@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
     stream = await createDialogueStream(
       message.trim(),
       history || [],
-      beliefs || []
+      (beliefs as any) || []
     )
   } catch (e) {
     console.error('Dialogue stream failed:', e)
