@@ -1,57 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase-server'
 
-// GET /api/contradictions — returns contradiction relations
-// ?full=true returns belief details joined
 export async function GET(req: NextRequest) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(req.url)
   const full = searchParams.get('full') === 'true'
 
-  if (!full) {
-    // Lightweight: just IDs and scores (for graph)
-    const { data: beliefs } = await supabase
-      .from('beliefs')
-      .select('id')
-      .eq('user_id', user.id)
-
-    if (!beliefs || beliefs.length === 0) {
-      return NextResponse.json({ relations: [] })
-    }
-
-    const beliefIds = beliefs.map((b) => b.id)
-
-    const { data: relations, error } = await supabase
-      .from('belief_relations')
-      .select('*')
-      .in('belief_id_1', beliefIds)
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
-
-    return NextResponse.json({ relations: relations || [] })
-  }
-
-  // Full mode: join belief content for the contradictions page
+  // Get all beliefs for this user
   const { data: beliefs } = await supabase
     .from('beliefs')
     .select('id, content, category, created_at')
     .eq('user_id', user.id)
 
   if (!beliefs || beliefs.length === 0) {
-    return NextResponse.json({ contradictions: [] })
+    return NextResponse.json({ relations: [], contradictions: [] })
   }
 
   const beliefIds = beliefs.map((b) => b.id)
   const beliefMap = new Map(beliefs.map((b) => [b.id, b]))
 
+  if (!full) {
+    // For graph — return all relations
+    const { data: relations, error } = await supabase
+      .from('belief_relations')
+      .select('*')
+      .in('belief_id_1', beliefIds)
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ relations: relations || [] })
+  }
+
+  // For contradictions page — return full contradiction pairs with belief content
   const { data: relations, error } = await supabase
     .from('belief_relations')
     .select('*')
@@ -59,9 +42,7 @@ export async function GET(req: NextRequest) {
     .eq('relation_type', 'contradicts')
     .order('strength_score', { ascending: false })
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   const contradictions = (relations || [])
     .map((rel) => {
