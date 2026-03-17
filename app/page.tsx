@@ -1,218 +1,133 @@
 'use client'
 
-import Link from 'next/link'
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
-import { Brain, GitBranch, Zap, Eye, ArrowRight, Network } from 'lucide-react'
-
-const features = [
-  {
-    icon: Brain,
-    title: 'Belief Extraction',
-    description:
-      'Write freely. The engine extracts, categorizes, and scores every conviction buried in your words.',
-  },
-  {
-    icon: GitBranch,
-    title: 'Contradiction Engine',
-    description:
-      'Every new thought is compared against your entire cognitive history. Inconsistencies surface immediately.',
-  },
-  {
-    icon: Network,
-    title: 'Belief Graph',
-    description:
-      'Your mind becomes a living map. Watch belief clusters form, contradict, and evolve in real time.',
-  },
-  {
-    icon: Eye,
-    title: 'The Mirror',
-    description:
-      'An AI that does not comfort you. It challenges your logic, questions your certainties, and forces clarity.',
-  },
-  {
-    icon: Zap,
-    title: 'Pattern Recognition',
-    description:
-      'Bias detection, cognitive dissonance alerts, and blind spot identification from your own data.',
-  },
-]
+import { createClient } from '@/lib/supabase-client'
+import { ArrowRight } from 'lucide-react'
 
 export default function LandingPage() {
+  const router = useRouter()
+  const [input, setInput] = useState('')
+  const [checking, setChecking] = useState(true)
+  const [authed, setAuthed] = useState(false)
+
+  useEffect(() => {
+    const supabase = createClient()
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setAuthed(!!user)
+      setChecking(false)
+    })
+  }, [])
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!input.trim()) return
+    if (authed) {
+      // Store thought and go to mirror
+      sessionStorage.setItem('pending_thought', input.trim())
+      router.push('/dialogue')
+    } else {
+      sessionStorage.setItem('pending_thought', input.trim())
+      router.push('/signup')
+    }
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSubmit(e as unknown as React.FormEvent)
+    }
+  }
+
+  if (checking) return null
+
   return (
-    <main className="min-h-screen bg-void relative overflow-hidden flex flex-col">
-      {/* Background effects */}
+    <main className="min-h-screen bg-void flex flex-col items-center justify-center px-6 relative overflow-hidden">
+      {/* Background */}
       <div className="fixed inset-0 pointer-events-none">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-glow-blue opacity-30 blur-3xl" />
-        <div className="absolute bottom-0 right-0 w-[600px] h-[400px] bg-glow-violet opacity-20 blur-3xl" />
-        <div className="absolute inset-0 grid-overlay opacity-50" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] rounded-full"
+          style={{ background: 'radial-gradient(ellipse, rgba(41,182,246,0.04) 0%, transparent 70%)' }} />
+        <div className="absolute inset-0"
+          style={{ backgroundImage: 'linear-gradient(rgba(79,195,247,0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(79,195,247,0.02) 1px, transparent 1px)', backgroundSize: '60px 60px' }} />
       </div>
 
-      {/* Nav */}
-      <nav className="relative z-10 flex justify-between items-center px-8 py-6 border-b border-border/30">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full animated-border p-[1px]">
-            <div className="w-full h-full rounded-full bg-void flex items-center justify-center">
-              <Brain size={14} className="text-electric" />
-            </div>
-          </div>
-          <span className="font-display text-lg text-bright tracking-wide">RCE</span>
-          <span className="text-dim text-xs font-mono ml-1">v1.0</span>
-        </div>
-        <div className="flex items-center gap-4">
-          <Link href="/login" className="btn-ghost px-4 py-2 rounded-lg text-sm">
-            Sign In
-          </Link>
-          <Link href="/signup" className="btn-primary px-4 py-2 rounded-lg text-sm">
-            Begin
-          </Link>
-        </div>
-      </nav>
-
-      {/* Hero */}
-      <section className="relative z-10 flex-1 flex flex-col items-center justify-center text-center px-6 py-24">
+      <div className="relative z-10 w-full max-w-2xl">
+        {/* Title */}
         <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 1, ease: 'easeOut' }}
+          className="text-center mb-16"
+        >
+          <p className="text-ghost text-xs font-mono uppercase tracking-[0.3em] mb-6">
+            Reflective Cognition Engine
+          </p>
+          <h1 className="font-display text-6xl md:text-8xl text-bright font-light leading-none mb-4">
+            What do you
+            <br />
+            <span style={{ color: '#29b6f6', textShadow: '0 0 40px rgba(41,182,246,0.3)' }}>
+              believe?
+            </span>
+          </h1>
+          <p className="text-ghost text-sm font-mono mt-6 opacity-60">
+            Write it. The mirror will answer.
+          </p>
+        </motion.div>
+
+        {/* The search bar */}
+        <motion.form
+          onSubmit={handleSubmit}
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8, ease: 'easeOut' }}
+          transition={{ duration: 1, delay: 0.3, ease: 'easeOut' }}
         >
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-electric/20 bg-electric/5 text-electric text-xs font-mono mb-8">
-            <span className="w-1.5 h-1.5 rounded-full bg-electric animate-pulse-slow" />
-            Cognitive Mirror · AI-Powered · Private
-          </div>
+          <div className="relative group">
+            {/* Glow behind input */}
+            <div className="absolute inset-0 rounded-2xl opacity-0 group-focus-within:opacity-100 transition-opacity duration-500"
+              style={{ background: 'radial-gradient(ellipse at center, rgba(41,182,246,0.08) 0%, transparent 70%)', filter: 'blur(20px)' }} />
 
-          <h1 className="font-display text-6xl md:text-8xl font-light text-bright mb-4 leading-none tracking-tight">
-            Reflective{' '}
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-electric to-violet-bright">
-              Cognition
-            </span>
-            <br />
-            Engine
-          </h1>
-
-          <p className="text-dim text-lg md:text-xl max-w-2xl mx-auto mb-6 font-light leading-relaxed">
-            Not a journal. Not a notes app.
-            <br />A long-term mirror for your mind.
-          </p>
-
-          <p className="text-ghost text-sm md:text-base max-w-xl mx-auto mb-12 font-mono">
-            It maps what you believe. It finds what you contradict.
-            <br />
-            It speaks back without mercy.
-          </p>
-
-          <div className="flex flex-col sm:flex-row items-center gap-4 justify-center">
-            <Link
-              href="/signup"
-              className="btn-primary px-8 py-3.5 rounded-xl text-sm flex items-center gap-2 group"
-            >
-              Enter the Engine
-              <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
-            </Link>
-            <Link
-              href="/login"
-              className="btn-ghost px-8 py-3.5 rounded-xl text-sm"
-            >
-              Return to your mind
-            </Link>
-          </div>
-        </motion.div>
-
-        {/* Animated belief nodes preview */}
-        <motion.div
-          initial={{ opacity: 0, scale: 0.8 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 1, delay: 0.4, ease: 'easeOut' }}
-          className="mt-20 relative w-full max-w-2xl h-64 mx-auto"
-        >
-          {/* SVG network preview */}
-          <svg className="w-full h-full" viewBox="0 0 600 250">
-            {/* Connecting lines */}
-            <line x1="100" y1="125" x2="230" y2="80" stroke="rgba(79,195,247,0.2)" strokeWidth="1" />
-            <line x1="100" y1="125" x2="230" y2="170" stroke="rgba(79,195,247,0.15)" strokeWidth="1" />
-            <line x1="230" y1="80" x2="380" y2="60" stroke="rgba(79,195,247,0.2)" strokeWidth="1" />
-            <line x1="230" y1="80" x2="380" y2="125" stroke="rgba(156,39,176,0.3)" strokeDasharray="4,4" strokeWidth="1.5" />
-            <line x1="230" y1="170" x2="380" y2="190" stroke="rgba(79,195,247,0.2)" strokeWidth="1" />
-            <line x1="380" y1="125" x2="500" y2="100" stroke="rgba(79,195,247,0.15)" strokeWidth="1" />
-            <line x1="380" y1="125" x2="500" y2="160" stroke="rgba(156,39,176,0.25)" strokeDasharray="4,4" strokeWidth="1.5" />
-            <line x1="380" y1="60" x2="500" y2="100" stroke="rgba(79,195,247,0.15)" strokeWidth="1" />
-
-            {/* Contradiction pulse */}
-            <circle cx="305" cy="100" r="30" fill="none" stroke="rgba(255,71,87,0.2)" strokeWidth="1">
-              <animate attributeName="r" values="25;35;25" dur="3s" repeatCount="indefinite" />
-              <animate attributeName="opacity" values="0.3;0.6;0.3" dur="3s" repeatCount="indefinite" />
-            </circle>
-
-            {/* Nodes */}
-            <circle cx="100" cy="125" r="16" fill="rgba(41,182,246,0.2)" stroke="rgba(41,182,246,0.5)" strokeWidth="1.5" />
-            <circle cx="230" cy="80" r="12" fill="rgba(171,71,188,0.2)" stroke="rgba(171,71,188,0.5)" strokeWidth="1.5" />
-            <circle cx="230" cy="170" r="10" fill="rgba(41,182,246,0.15)" stroke="rgba(41,182,246,0.3)" strokeWidth="1" />
-            <circle cx="380" cy="60" r="11" fill="rgba(41,182,246,0.15)" stroke="rgba(41,182,246,0.35)" strokeWidth="1" />
-            <circle cx="380" cy="125" r="18" fill="rgba(255,71,87,0.15)" stroke="rgba(255,71,87,0.5)" strokeWidth="1.5" />
-            <circle cx="380" cy="190" r="9" fill="rgba(171,71,188,0.15)" stroke="rgba(171,71,188,0.3)" strokeWidth="1" />
-            <circle cx="500" cy="100" r="13" fill="rgba(41,182,246,0.2)" stroke="rgba(41,182,246,0.4)" strokeWidth="1" />
-            <circle cx="500" cy="160" r="10" fill="rgba(171,71,188,0.15)" stroke="rgba(171,71,188,0.35)" strokeWidth="1" />
-
-            {/* Contradiction label */}
-            <text x="290" y="97" textAnchor="middle" fill="rgba(255,71,87,0.6)" fontSize="8" fontFamily="monospace">
-              CONTRADICTION
-            </text>
-
-            {/* Subtle category labels */}
-            <text x="100" y="147" textAnchor="middle" fill="rgba(79,195,247,0.4)" fontSize="7" fontFamily="monospace">identity</text>
-            <text x="380" y="147" textAnchor="middle" fill="rgba(255,71,87,0.4)" fontSize="7" fontFamily="monospace">ethics</text>
-          </svg>
-
-          {/* Overlay gradient */}
-          <div className="absolute inset-0 bg-gradient-to-t from-void via-transparent to-transparent" />
-        </motion.div>
-      </section>
-
-      {/* Features */}
-      <section className="relative z-10 px-6 pb-24">
-        <div className="max-w-5xl mx-auto">
-          <div className="text-center mb-12">
-            <h2 className="font-display text-3xl text-bright mb-3">What it does to your mind</h2>
-            <p className="text-dim text-sm font-mono">This is not for everyone. It is for thinkers.</p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {features.map((feature, i) => (
-              <motion.div
-                key={feature.title}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: 0.1 * i }}
-                className="glass glass-hover rounded-xl p-6"
+            <div className="relative flex items-end gap-0 rounded-2xl border border-white/5 group-focus-within:border-electric/20 transition-all duration-500"
+              style={{ background: 'rgba(8,8,14,0.95)' }}>
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="A thought. A conviction. A doubt."
+                rows={3}
+                autoFocus
+                className="flex-1 bg-transparent px-6 py-5 text-bright text-base font-mono resize-none outline-none placeholder-ghost/25 leading-relaxed"
+                style={{ minHeight: '100px', maxHeight: '240px' }}
+                onInput={(e) => {
+                  const t = e.target as HTMLTextAreaElement
+                  t.style.height = 'auto'
+                  t.style.height = Math.min(t.scrollHeight, 240) + 'px'
+                }}
+              />
+              <button
+                type="submit"
+                disabled={!input.trim()}
+                className="m-3 w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-200 disabled:opacity-20"
+                style={{ background: input.trim() ? 'rgba(41,182,246,0.15)' : 'transparent', border: '1px solid rgba(41,182,246,0.2)' }}
               >
-                <feature.icon size={20} className="text-electric mb-4" />
-                <h3 className="text-bright font-medium mb-2 text-sm">{feature.title}</h3>
-                <p className="text-dim text-xs leading-relaxed">{feature.description}</p>
-              </motion.div>
-            ))}
+                <ArrowRight size={16} className="text-electric" />
+              </button>
+            </div>
           </div>
-        </div>
-      </section>
 
-      {/* Warning section */}
-      <section className="relative z-10 px-6 pb-16">
-        <div className="max-w-2xl mx-auto">
-          <div className="glass rounded-xl p-8 border border-violet-glow/20 text-center">
-            <p className="font-display text-xl text-bright mb-3">
-              &ldquo;The unexamined life is not worth living.&rdquo;
-            </p>
-            <p className="text-dim text-xs font-mono">— Socrates (and this engine agrees)</p>
+          <div className="flex justify-between mt-3 px-1">
+            <span className="text-ghost/40 text-[10px] font-mono">Enter to continue</span>
+            {!authed && (
+              <span className="text-ghost/40 text-[10px] font-mono">
+                Already mapped?{' '}
+                <button type="button" onClick={() => router.push('/login')} className="text-electric/60 hover:text-electric transition-colors">
+                  sign in
+                </button>
+              </span>
+            )}
           </div>
-        </div>
-      </section>
-
-      {/* Footer */}
-      <footer className="relative z-10 border-t border-border/30 py-6 px-8 flex justify-between items-center">
-        <span className="text-ghost text-xs font-mono">RCE · Cognitive Mirror System</span>
-        <Link href="/signup" className="text-electric text-xs font-mono hover:underline">
-          Begin your cognitive map →
-        </Link>
-      </footer>
+        </motion.form>
+      </div>
     </main>
   )
 }
-
