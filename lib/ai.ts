@@ -115,6 +115,9 @@ Rules:
 - 1.0 = direct logical opposition
 - 0.35-0.6 = tension or inconsistency
 - Do NOT flag differences in emphasis as contradictions
+- ONLY flag contradictions where both beliefs are about the SAME topic and directly oppose each other logically
+- If the two beliefs are about completely different subjects, they are NOT a contradiction
+- A contradiction requires: same domain + opposite claims. Different domains = not a contradiction.
 - If none exist: has_contradiction false, empty array`,
       },
     ],
