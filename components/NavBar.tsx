@@ -7,10 +7,10 @@ import { createClient } from '@/lib/supabase-client'
 import { motion } from 'framer-motion'
 
 const navItems = [
-  { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { href: '/dialogue', icon: Orbit, label: 'Mirror' },
+  { href: '/dashboard', icon: LayoutDashboard, label: 'Overview' },
   { href: '/graph', icon: Network, label: 'Belief Map' },
-  { href: '/contradictions', icon: GitBranch, label: 'Contradictions' },
+  { href: '/contradictions', icon: GitBranch, label: 'Conflicts' },
   { href: '/insights', icon: Lightbulb, label: 'Insights' },
 ]
 
@@ -26,62 +26,75 @@ export default function NavBar() {
   }
 
   return (
-    <aside className="fixed left-0 top-0 bottom-0 w-[200px] z-50 flex flex-col border-r border-border/30 bg-abyss/80 backdrop-blur-xl">
+    <aside className="fixed left-0 top-0 bottom-0 w-16 z-50 flex flex-col items-center border-r py-4"
+      style={{ background: 'rgba(3,3,8,0.95)', borderColor: 'rgba(255,255,255,0.04)', backdropFilter: 'blur(20px)' }}>
+
       {/* Logo */}
-      <div className="p-5 border-b border-border/20">
-        <div className="flex items-center gap-3">
-          <div className="w-7 h-7 rounded-full animated-border p-[1px] shrink-0">
-            <div className="w-full h-full rounded-full bg-void flex items-center justify-center">
-              <Brain size={12} className="text-electric" />
-            </div>
-          </div>
-          <div>
-            <div className="font-display text-sm text-bright leading-none">RCE</div>
-            <div className="font-mono text-[9px] text-ghost mt-0.5">Cognition Engine</div>
+      <div className="mb-8">
+        <div className="w-8 h-8 rounded-full p-[1px]" style={{ background: 'linear-gradient(135deg, #29b6f6, #ab47bc)' }}>
+          <div className="w-full h-full rounded-full bg-void flex items-center justify-center">
+            <Brain size={13} className="text-electric" />
           </div>
         </div>
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 py-4 px-3 space-y-0.5">
+      {/* Nav icons */}
+      <nav className="flex-1 flex flex-col items-center gap-1">
         {navItems.map((item) => {
           const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
           return (
             <Link
               key={item.href}
               href={item.href}
-              className={`relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 group ${
-                isActive
-                  ? 'text-bright bg-electric/8 border border-electric/12'
-                  : 'text-ghost hover:text-pale hover:bg-surface/40'
-              }`}
+              title={item.label}
+              className="relative w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-200 group"
+              style={{
+                background: isActive ? 'rgba(41,182,246,0.1)' : 'transparent',
+                border: isActive ? '1px solid rgba(41,182,246,0.2)' : '1px solid transparent',
+              }}
             >
               {isActive && (
                 <motion.div
-                  layoutId="nav-indicator"
-                  className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 rounded-full bg-electric"
+                  layoutId="nav-dot"
+                  className="absolute -left-0.5 top-1/2 -translate-y-1/2 w-0.5 h-4 rounded-full"
+                  style={{ background: '#29b6f6' }}
                 />
               )}
               <item.icon
-                size={14}
-                className={isActive ? 'text-electric shrink-0' : 'text-ghost group-hover:text-pale shrink-0'}
+                size={15}
+                style={{ color: isActive ? '#4fc3f7' : 'rgba(107,107,138,0.7)' }}
               />
-              <span className="font-medium text-sm">{item.label}</span>
+              {/* Tooltip */}
+              <div className="absolute left-14 px-2.5 py-1.5 rounded-lg text-xs font-mono whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-150"
+                style={{ background: 'rgba(10,10,16,0.95)', border: '1px solid rgba(255,255,255,0.08)', color: '#c4c4d8' }}>
+                {item.label}
+              </div>
             </Link>
           )
         })}
       </nav>
 
       {/* Sign out */}
-      <div className="p-3 border-t border-border/20">
-        <button
-          onClick={handleSignOut}
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-ghost hover:text-contradiction hover:bg-contradiction/5 transition-all duration-200"
-        >
-          <LogOut size={14} />
-          <span>Disconnect</span>
-        </button>
-      </div>
+      <button
+        onClick={handleSignOut}
+        title="Disconnect"
+        className="w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-200 group relative"
+        style={{ border: '1px solid transparent' }}
+        onMouseEnter={e => {
+          (e.currentTarget as HTMLElement).style.background = 'rgba(255,71,87,0.08)'
+          ;(e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,71,87,0.15)'
+        }}
+        onMouseLeave={e => {
+          (e.currentTarget as HTMLElement).style.background = 'transparent'
+          ;(e.currentTarget as HTMLElement).style.borderColor = 'transparent'
+        }}
+      >
+        <LogOut size={14} style={{ color: 'rgba(107,107,138,0.6)' }} />
+        <div className="absolute left-14 px-2.5 py-1.5 rounded-lg text-xs font-mono whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-150"
+          style={{ background: 'rgba(10,10,16,0.95)', border: '1px solid rgba(255,255,255,0.08)', color: '#ff4757' }}>
+          Disconnect
+        </div>
+      </button>
     </aside>
   )
 }

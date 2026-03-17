@@ -2,19 +2,13 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Send, Loader2, Brain, User, AlertTriangle, Trash2, X } from 'lucide-react'
+import { ArrowRight, Loader2, Brain, User, AlertTriangle, Trash2, X } from 'lucide-react'
 import type { ChatMessage, Belief, ContradictionResult } from '@/lib/types'
 
 const CATEGORY_COLORS: Record<string, string> = {
-  philosophy: '#ab47bc',
-  identity: '#29b6f6',
-  habit: '#66bb6a',
-  relationships: '#ef5350',
-  career: '#ffa726',
-  worldview: '#7e57c2',
-  ethics: '#26c6da',
-  emotion: '#ec407a',
-  general: '#78909c',
+  philosophy: '#ab47bc', identity: '#29b6f6', habit: '#66bb6a',
+  relationships: '#ef5350', career: '#ffa726', worldview: '#7e57c2',
+  ethics: '#26c6da', emotion: '#ec407a', general: '#78909c',
 }
 
 interface FeedItem {
@@ -27,10 +21,9 @@ interface FeedItem {
 }
 
 function formatContent(text: string) {
-  const parts = text.split(/(\*[^*]+\*)/)
-  return parts.map((part, i) => {
+  return text.split(/(\*[^*]+\*)/).map((part, i) => {
     if (part.startsWith('*') && part.endsWith('*')) {
-      return <em key={i} className="text-electric not-italic">{part.slice(1, -1)}</em>
+      return <em key={i} className="not-italic" style={{ color: '#4fc3f7' }}>{part.slice(1, -1)}</em>
     }
     return <span key={i}>{part}</span>
   })
@@ -45,22 +38,20 @@ export default function MirrorPage() {
   const [allBeliefs, setAllBeliefs] = useState<Belief[]>([])
   const [showMemory, setShowMemory] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [started, setStarted] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
-    fetch('/api/beliefs')
-      .then((r) => r.json())
-      .then((d) => setAllBeliefs(d.beliefs || []))
+    fetch('/api/beliefs').then(r => r.json()).then(d => setAllBeliefs(d.beliefs || []))
   }, [])
 
-  // Pick up pending thought from landing page
   useEffect(() => {
     const pending = sessionStorage.getItem('pending_thought')
     if (pending) {
       sessionStorage.removeItem('pending_thought')
       setInput(pending)
-      setTimeout(() => inputRef.current?.focus(), 100)
+      setTimeout(() => inputRef.current?.focus(), 200)
     }
   }, [])
 
@@ -75,19 +66,18 @@ export default function MirrorPage() {
     const thought = input.trim()
     setInput('')
     setProcessing(true)
+    setStarted(true)
 
-    const userItem: FeedItem = {
+    setFeed(prev => [...prev, {
       type: 'user_thought',
       id: Date.now().toString(),
       content: thought,
       timestamp: new Date().toISOString(),
-    }
-    setFeed((prev) => [...prev, userItem])
+    }])
 
     // Extract beliefs silently
     let extractedBeliefs: Belief[] = []
     let detectedContradictions: ContradictionResult[] = []
-
     try {
       const res = await fetch('/api/beliefs', {
         method: 'POST',
@@ -96,25 +86,21 @@ export default function MirrorPage() {
       })
       const data = await res.json()
       extractedBeliefs = data.beliefs || []
-      detectedContradictions = data.contradictions || []
-      setAllBeliefs((prev) => [...extractedBeliefs, ...prev])
+      detectedContradictions = (data.contradictions || []).filter((c: ContradictionResult) => c.contradiction_score > 0.75)
+      setAllBeliefs(prev => [...extractedBeliefs, ...prev])
 
-      // Only show note if there's a contradiction
       if (detectedContradictions.length > 0) {
-        const noteItem: FeedItem = {
+        setFeed(prev => [...prev, {
           type: 'belief_note',
           id: Date.now().toString() + '_n',
           timestamp: new Date().toISOString(),
           beliefs: extractedBeliefs,
           contradictions: detectedContradictions,
-        }
-        setFeed((prev) => [...prev, noteItem])
+        }])
       }
-    } catch (e) {
-      console.error(e)
-    }
+    } catch (e) { console.error(e) }
 
-    // AI response
+    // AI response stream
     setStreamedText('')
     try {
       const res = await fetch('/api/dialogue', {
@@ -122,11 +108,9 @@ export default function MirrorPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: thought, history: chatHistory }),
       })
-
       const reader = res.body?.getReader()
       const decoder = new TextDecoder()
       let fullText = ''
-
       if (reader) {
         while (true) {
           const { done, value } = await reader.read()
@@ -135,20 +119,16 @@ export default function MirrorPage() {
           setStreamedText(fullText)
         }
       }
-
-      const aiMsg: ChatMessage = { role: 'assistant', content: fullText, timestamp: new Date().toISOString() }
       const userMsg: ChatMessage = { role: 'user', content: thought, timestamp: new Date().toISOString() }
-      setChatHistory((prev) => [...prev, userMsg, aiMsg])
-
-      setFeed((prev) => [...prev, {
+      const aiMsg: ChatMessage = { role: 'assistant', content: fullText, timestamp: new Date().toISOString() }
+      setChatHistory(prev => [...prev, userMsg, aiMsg])
+      setFeed(prev => [...prev, {
         type: 'ai_response',
         id: Date.now().toString() + '_ai',
         content: fullText,
         timestamp: new Date().toISOString(),
       }])
-    } catch (e) {
-      console.error(e)
-    }
+    } catch (e) { console.error(e) }
 
     setStreamedText('')
     setProcessing(false)
@@ -165,197 +145,230 @@ export default function MirrorPage() {
   const deleteBelief = useCallback(async (id: string) => {
     setDeletingId(id)
     await fetch('/api/beliefs/' + id, { method: 'DELETE' })
-    setAllBeliefs((prev) => prev.filter((b) => b.id !== id))
+    setAllBeliefs(prev => prev.filter(b => b.id !== id))
     setDeletingId(null)
   }, [])
 
   return (
-    <div className="max-w-2xl mx-auto flex flex-col" style={{ height: 'calc(100vh - 4rem)' }}>
-      {/* Header */}
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mb-4 shrink-0 flex items-center justify-between">
-        <div>
-          <div className="flex items-center gap-2 mb-0.5">
-            <span className="w-1 h-1 rounded-full bg-electric animate-pulse-slow" />
-            <span className="text-electric text-[10px] font-mono uppercase tracking-widest">Mirror · Active</span>
-          </div>
-          <h1 className="font-display text-3xl text-bright font-light">The Mirror</h1>
-        </div>
+    <div className="min-h-screen flex flex-col items-center px-6 py-12 relative">
+
+      {/* Memory button — top right */}
+      <div className="fixed top-5 right-6 z-20">
         <button
           onClick={() => setShowMemory(!showMemory)}
-          className="text-ghost hover:text-pale text-xs font-mono transition-colors border border-border/30 hover:border-electric/20 px-3 py-1.5 rounded-lg"
+          className="text-[11px] font-mono transition-all duration-200 px-3 py-1.5 rounded-lg"
+          style={{
+            color: 'rgba(107,107,138,0.7)',
+            border: '1px solid rgba(255,255,255,0.06)',
+            background: 'rgba(5,5,10,0.8)'
+          }}
         >
-          {allBeliefs.length} beliefs
+          {allBeliefs.length} beliefs mapped
         </button>
-      </motion.div>
+      </div>
 
       {/* Memory panel */}
       <AnimatePresence>
         {showMemory && (
           <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="shrink-0 mb-4 overflow-hidden"
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="fixed top-14 right-6 w-80 rounded-2xl p-4 z-20 max-h-80 overflow-y-auto"
+            style={{ background: 'rgba(8,8,14,0.98)', border: '1px solid rgba(255,255,255,0.07)' }}
           >
-            <div className="glass rounded-xl p-4 max-h-52 overflow-y-auto">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-pale text-xs font-mono uppercase tracking-widest">Mapped beliefs</span>
-                <button onClick={() => setShowMemory(false)} className="text-ghost hover:text-pale">
-                  <X size={12} />
-                </button>
-              </div>
-              {allBeliefs.length === 0 ? (
-                <p className="text-ghost text-xs font-mono">Nothing mapped yet.</p>
-              ) : (
-                <div className="space-y-1.5">
-                  {allBeliefs.map((b) => (
-                    <div key={b.id} className="flex items-start gap-2 group">
-                      <div className="w-1 h-1 rounded-full mt-1.5 shrink-0" style={{ background: CATEGORY_COLORS[b.category] }} />
-                      <p className="flex-1 text-dim text-xs leading-relaxed">{b.content}</p>
-                      <button
-                        onClick={() => deleteBelief(b.id)}
-                        disabled={deletingId === b.id}
-                        className="opacity-0 group-hover:opacity-100 text-ghost hover:text-contradiction transition-all shrink-0"
-                      >
-                        {deletingId === b.id ? <Loader2 size={10} className="animate-spin" /> : <Trash2 size={10} />}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: 'rgba(107,107,138,0.7)' }}>
+                Mapped Beliefs
+              </span>
+              <button onClick={() => setShowMemory(false)} style={{ color: 'rgba(107,107,138,0.5)' }}>
+                <X size={12} />
+              </button>
             </div>
+            {allBeliefs.length === 0 ? (
+              <p className="text-xs font-mono" style={{ color: 'rgba(107,107,138,0.4)' }}>Nothing mapped yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {allBeliefs.map(b => (
+                  <div key={b.id} className="flex items-start gap-2 group">
+                    <div className="w-1 h-1 rounded-full mt-1.5 shrink-0" style={{ background: CATEGORY_COLORS[b.category] }} />
+                    <p className="flex-1 text-xs leading-relaxed" style={{ color: 'rgba(155,155,185,0.7)' }}>{b.content}</p>
+                    <button
+                      onClick={() => deleteBelief(b.id)}
+                      disabled={deletingId === b.id}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                      style={{ color: 'rgba(255,71,87,0.6)' }}
+                    >
+                      {deletingId === b.id ? <Loader2 size={10} className="animate-spin" /> : <Trash2 size={10} />}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
 
+      {/* Empty state — looks like landing */}
+      {!started && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -20 }}
+          className="flex flex-col items-center text-center mb-16 mt-8"
+        >
+          <p className="text-xs font-mono uppercase tracking-[0.3em] mb-8" style={{ color: 'rgba(107,107,138,0.4)' }}>
+            Reflective Cognition Engine
+          </p>
+          <h1 className="font-display font-light leading-none mb-4" style={{ fontSize: 'clamp(3rem,8vw,6rem)', color: '#e8e8f0' }}>
+            What do you
+            <br />
+            <span style={{ color: '#29b6f6', textShadow: '0 0 50px rgba(41,182,246,0.35)' }}>believe?</span>
+          </h1>
+          <p className="text-sm font-light" style={{ color: 'rgba(107,107,138,0.5)' }}>
+            Write it. The mirror will answer.
+          </p>
+        </motion.div>
+      )}
+
       {/* Feed */}
-      <div className="flex-1 overflow-y-auto space-y-5 pb-4 pr-1">
-        {feed.length === 0 && !processing && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.3 }}
-            className="flex flex-col items-center justify-center h-full text-center"
-          >
-            <div className="w-12 h-12 rounded-full animated-border p-[1.5px] mb-5">
-              <div className="w-full h-full rounded-full bg-void flex items-center justify-center">
-                <Brain size={18} className="text-electric" />
+      {started && (
+        <div className="w-full max-w-2xl space-y-5 mb-8">
+          <AnimatePresence initial={false}>
+            {feed.map(item => (
+              <motion.div
+                key={item.id}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3 }}
+              >
+                {/* User */}
+                {item.type === 'user_thought' && (
+                  <div className="flex gap-2.5 justify-end">
+                    <div className="max-w-[78%] rounded-2xl px-5 py-3.5"
+                      style={{ background: 'rgba(41,182,246,0.06)', border: '1px solid rgba(41,182,246,0.1)' }}>
+                      <p className="text-sm leading-relaxed" style={{ color: '#c4c4d8' }}>{item.content}</p>
+                    </div>
+                    <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-1"
+                      style={{ background: 'rgba(41,182,246,0.08)', border: '1px solid rgba(41,182,246,0.15)' }}>
+                      <User size={11} style={{ color: '#4fc3f7' }} />
+                    </div>
+                  </div>
+                )}
+
+                {/* Contradiction note */}
+                {item.type === 'belief_note' && item.contradictions && item.contradictions.length > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, x: -8 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="flex items-start gap-2 px-1"
+                  >
+                    <AlertTriangle size={10} className="mt-0.5 shrink-0" style={{ color: 'rgba(255,71,87,0.5)' }} />
+                    <p className="text-[11px] font-mono leading-relaxed" style={{ color: 'rgba(107,107,138,0.6)' }}>
+                      Contradicts what you said:{' '}
+                      <span style={{ color: 'rgba(155,155,185,0.6)' }}>
+                        &ldquo;{item.contradictions[0].belief_content.length > 70
+                          ? item.contradictions[0].belief_content.slice(0, 70) + '...'
+                          : item.contradictions[0].belief_content}&rdquo;
+                      </span>
+                    </p>
+                  </motion.div>
+                )}
+
+                {/* AI */}
+                {item.type === 'ai_response' && (
+                  <div className="flex gap-2.5">
+                    <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-1"
+                      style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(171,71,188,0.2)' }}>
+                      <Brain size={11} style={{ color: '#ce93d8' }} />
+                    </div>
+                    <div className="max-w-[85%] rounded-2xl px-5 py-4"
+                      style={{ background: 'rgba(10,10,16,0.8)', border: '1px solid rgba(255,255,255,0.04)' }}>
+                      <p className="text-sm leading-relaxed" style={{ color: '#b0b0cc' }}>
+                        {formatContent(item.content || '')}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </motion.div>
+            ))}
+          </AnimatePresence>
+
+          {/* Streaming */}
+          {processing && (
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex gap-2.5">
+              <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-1"
+                style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(171,71,188,0.2)' }}>
+                <Brain size={11} style={{ color: '#ce93d8' }} />
+              </div>
+              <div className="max-w-[85%] rounded-2xl px-5 py-4"
+                style={{ background: 'rgba(10,10,16,0.8)', border: '1px solid rgba(255,255,255,0.04)' }}>
+                {streamedText ? (
+                  <p className="text-sm leading-relaxed cursor-blink" style={{ color: '#b0b0cc' }}>
+                    {formatContent(streamedText)}
+                  </p>
+                ) : (
+                  <div className="flex gap-1.5 items-center">
+                    <div className="w-1 h-1 rounded-full animate-pulse" style={{ background: '#ce93d8' }} />
+                    <div className="w-1 h-1 rounded-full animate-pulse" style={{ background: '#ce93d8', animationDelay: '0.2s' }} />
+                    <div className="w-1 h-1 rounded-full animate-pulse" style={{ background: '#ce93d8', animationDelay: '0.4s' }} />
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+          <div ref={bottomRef} />
+        </div>
+      )}
+
+      {/* Input — same style as landing, sticky at bottom */}
+      <div className={`w-full max-w-2xl ${started ? 'sticky bottom-6' : ''}`}>
+        <form onSubmit={handleSubmit}>
+          <div className="relative group">
+            <div className="absolute inset-0 rounded-2xl opacity-0 group-focus-within:opacity-100 transition-opacity duration-500"
+              style={{ background: 'radial-gradient(ellipse, rgba(41,182,246,0.08) 0%, transparent 70%)', filter: 'blur(30px)' }} />
+            <div
+              className="relative rounded-2xl transition-all duration-300"
+              style={{ background: 'rgba(8,8,14,0.97)', border: '1px solid rgba(255,255,255,0.08)' }}
+              onFocus={() => {}}
+            >
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={started ? 'Continue...' : 'Write a thought, a conviction, a doubt...'}
+                disabled={processing}
+                rows={started ? 2 : 3}
+                className="w-full bg-transparent px-6 pt-5 pb-2 text-base font-mono resize-none outline-none leading-relaxed"
+                style={{
+                  color: '#e8e8f0',
+                  caretColor: '#4fc3f7',
+                  minHeight: started ? '70px' : '100px',
+                  maxHeight: '200px',
+                }}
+                onInput={e => {
+                  const t = e.target as HTMLTextAreaElement
+                  t.style.height = 'auto'
+                  t.style.height = Math.min(t.scrollHeight, 200) + 'px'
+                }}
+              />
+              <style>{`textarea::placeholder { color: rgba(107,107,138,0.4); }`}</style>
+              <div className="flex items-center justify-between px-5 pb-4">
+                <span className="text-[10px] font-mono" style={{ color: 'rgba(107,107,138,0.35)' }}>
+                  {started ? 'Enter to send' : 'Enter to begin'}
+                </span>
+                <button
+                  type="submit"
+                  disabled={!input.trim() || processing}
+                  className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 disabled:opacity-20"
+                  style={{ background: 'rgba(41,182,246,0.1)', border: '1px solid rgba(41,182,246,0.2)', color: '#4fc3f7' }}
+                >
+                  {processing ? <Loader2 size={13} className="animate-spin" /> : <ArrowRight size={13} />}
+                </button>
               </div>
             </div>
-            <p className="font-display text-2xl text-bright mb-2">Speak.</p>
-            <p className="text-ghost text-xs font-mono max-w-xs leading-relaxed opacity-70">
-              Write what you think. The mirror has no mercy, no comfort — only clarity.
-            </p>
-          </motion.div>
-        )}
-
-        <AnimatePresence initial={false}>
-          {feed.map((item) => (
-            <motion.div
-              key={item.id}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.25 }}
-            >
-              {/* User */}
-              {item.type === 'user_thought' && (
-                <div className="flex gap-2.5 justify-end">
-                  <div className="max-w-[78%] rounded-xl px-4 py-3"
-                    style={{ background: 'rgba(41,182,246,0.06)', border: '1px solid rgba(41,182,246,0.1)' }}>
-                    <p className="text-pale text-sm leading-relaxed">{item.content}</p>
-                  </div>
-                  <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-1"
-                    style={{ background: 'rgba(41,182,246,0.08)', border: '1px solid rgba(41,182,246,0.15)' }}>
-                    <User size={11} className="text-electric" />
-                  </div>
-                </div>
-              )}
-
-              {/* Contradiction note — minimal */}
-              {item.type === 'belief_note' && item.contradictions && item.contradictions.length > 0 && (
-                <div className="flex items-start gap-2 px-2">
-                  <AlertTriangle size={11} className="text-contradiction/60 mt-0.5 shrink-0" />
-                  <div>
-                    {item.contradictions.slice(0, 1).map((c) => (
-                      <p key={c.belief_id} className="text-[11px] text-ghost/70 font-mono leading-relaxed">
-                        Contradicts: &ldquo;{c.belief_content.length > 80 ? c.belief_content.slice(0, 80) + '...' : c.belief_content}&rdquo;
-                      </p>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* AI */}
-              {item.type === 'ai_response' && (
-                <div className="flex gap-2.5">
-                  <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-1"
-                    style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(171,71,188,0.25)' }}>
-                    <Brain size={11} className="text-violet-bright" />
-                  </div>
-                  <div className="max-w-[85%] rounded-xl px-4 py-3"
-                    style={{ background: 'rgba(13,13,20,0.7)', border: '1px solid rgba(255,255,255,0.04)' }}>
-                    <p className="text-soft text-sm leading-relaxed">{formatContent(item.content || '')}</p>
-                  </div>
-                </div>
-              )}
-            </motion.div>
-          ))}
-        </AnimatePresence>
-
-        {/* Streaming */}
-        {processing && (
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex gap-2.5">
-            <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-1"
-              style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(171,71,188,0.25)' }}>
-              <Brain size={11} className="text-violet-bright" />
-            </div>
-            <div className="max-w-[85%] rounded-xl px-4 py-3"
-              style={{ background: 'rgba(13,13,20,0.7)', border: '1px solid rgba(255,255,255,0.04)' }}>
-              {streamedText ? (
-                <p className="text-soft text-sm leading-relaxed cursor-blink">{formatContent(streamedText)}</p>
-              ) : (
-                <Loader2 size={12} className="text-violet-bright/50 animate-spin" />
-              )}
-            </div>
-          </motion.div>
-        )}
-
-        <div ref={bottomRef} />
-      </div>
-
-      {/* Input */}
-      <div className="shrink-0 pt-3 border-t border-white/4">
-        <form onSubmit={handleSubmit} className="flex gap-2.5 items-end">
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="What do you believe..."
-            disabled={processing}
-            rows={1}
-            className="flex-1 rounded-xl px-4 py-3 text-sm resize-none font-mono outline-none text-pale placeholder-ghost/25 leading-relaxed"
-            style={{
-              maxHeight: '120px',
-              background: 'rgba(8,8,14,0.9)',
-              border: '1px solid rgba(255,255,255,0.05)',
-            }}
-            onFocus={(e) => { e.target.style.borderColor = 'rgba(41,182,246,0.2)' }}
-            onBlur={(e) => { e.target.style.borderColor = 'rgba(255,255,255,0.05)' }}
-            onInput={(e) => {
-              const t = e.target as HTMLTextAreaElement
-              t.style.height = 'auto'
-              t.style.height = Math.min(t.scrollHeight, 120) + 'px'
-            }}
-          />
-          <button
-            type="submit"
-            disabled={!input.trim() || processing}
-            className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-all duration-200 disabled:opacity-20"
-            style={{ background: 'rgba(41,182,246,0.1)', border: '1px solid rgba(41,182,246,0.15)' }}
-          >
-            {processing ? <Loader2 size={13} className="animate-spin text-electric" /> : <Send size={13} className="text-electric" />}
-          </button>
+          </div>
         </form>
       </div>
     </div>
