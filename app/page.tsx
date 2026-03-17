@@ -1,13 +1,12 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
-import dynamic from 'next/dynamic'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Network, Info, X } from 'lucide-react'
 import type { Belief, GraphData, GraphNode, GraphLink } from '@/lib/types'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), { ssr: false }) as any
+let ForceGraph2D: any = null
 
 const CATEGORY_COLORS: Record<string, string> = {
   philosophy: '#ab47bc',
@@ -33,7 +32,6 @@ interface BeliefRelation {
   belief_id_2: string
   relation_type: string
   strength_score: number
-  explanation?: string
 }
 
 export default function GraphPage() {
@@ -41,7 +39,15 @@ export default function GraphPage() {
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null)
   const [loading, setLoading] = useState(true)
   const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null)
+  const [graphLoaded, setGraphLoaded] = useState(false)
   const graphRef = useRef(null)
+
+  useEffect(() => {
+    import('react-force-graph-2d').then((mod) => {
+      ForceGraph2D = mod.default
+      setGraphLoaded(true)
+    })
+  }, [])
 
   useEffect(() => {
     Promise.all([
@@ -123,6 +129,8 @@ export default function GraphPage() {
     [selectedNode, hoveredNode]
   )
 
+  const isReady = !loading && graphLoaded
+
   return (
     <div className="max-w-7xl mx-auto">
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
@@ -163,7 +171,7 @@ export default function GraphPage() {
           className="flex-1 glass rounded-2xl overflow-hidden"
           style={{ height: '70vh' }}
         >
-          {loading ? (
+          {!isReady ? (
             <div className="flex items-center justify-center h-full">
               <div className="flex flex-col items-center gap-3">
                 <div className="w-8 h-8 border-2 border-electric/30 border-t-electric rounded-full animate-spin" />
@@ -215,29 +223,22 @@ export default function GraphPage() {
                   <X size={14} />
                 </button>
               </div>
-
               <p className="text-bright text-sm leading-relaxed mb-4">{selectedNode.content}</p>
-
               <div className="space-y-2">
                 <div className="flex justify-between">
                   <span className="text-ghost text-xs font-mono">Category</span>
-                  <span
-                    className="text-xs font-mono capitalize"
-                    style={{ color: CATEGORY_COLORS[selectedNode.category] || '#78909c' }}
-                  >
+                  <span className="text-xs font-mono capitalize" style={{ color: CATEGORY_COLORS[selectedNode.category] || '#78909c' }}>
                     {selectedNode.category}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-ghost text-xs font-mono">Confidence</span>
-                  <span className="text-pale text-xs font-mono">
-                    {Math.round(selectedNode.confidence_score * 100)}%
-                  </span>
+                  <span className="text-pale text-xs font-mono">{Math.round(selectedNode.confidence_score * 100)}%</span>
                 </div>
                 <div className="mt-3">
                   <div className="h-1.5 rounded-full bg-border overflow-hidden">
                     <div
-                      className="h-full rounded-full transition-all"
+                      className="h-full rounded-full"
                       style={{
                         width: `${selectedNode.confidence_score * 100}%`,
                         background: `linear-gradient(90deg, ${CATEGORY_COLORS[selectedNode.category]}80, ${CATEGORY_COLORS[selectedNode.category]})`,
