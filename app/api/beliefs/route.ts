@@ -17,22 +17,30 @@ export async function GET() {
   return NextResponse.json({ beliefs })
 }
 
-// Simple similarity check — are two strings about the same thing?
+// Semantic similarity — catches paraphrases like "not ideal" vs "unpleasant"
 function isSimilar(a: string, b: string): boolean {
-  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim()
+  const norm = (s: string) => s.toLowerCase()
+    .replace(/\b(is|are|was|were|a|an|the|it|its|not|no|so|very|quite|really|just|also|too|for|with|and|or|but|in|on|at|to|of|my|i|you|we|they|he|she|this|that|these|those)\b/g, ' ')
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
   const na = norm(a)
   const nb = norm(b)
   if (na === nb) return true
 
-  // Check if one contains most words of the other
+  // Word overlap — ignore stop words
   const wordsA = new Set(na.split(' ').filter(w => w.length > 3))
   const wordsB = new Set(nb.split(' ').filter(w => w.length > 3))
+  if (wordsA.size === 0 && wordsB.size === 0) return true
   if (wordsA.size === 0 || wordsB.size === 0) return false
 
   let overlap = 0
   wordsA.forEach(w => { if (wordsB.has(w)) overlap++ })
-  const similarity = overlap / Math.min(wordsA.size, wordsB.size)
-  return similarity > 0.7
+  const ratio = overlap / Math.min(wordsA.size, wordsB.size)
+
+  // High overlap = same belief stated differently
+  return ratio >= 0.6
 }
 
 export async function POST(req: NextRequest) {

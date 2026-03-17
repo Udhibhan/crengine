@@ -12,10 +12,17 @@ const CATEGORY_COLORS: Record<string, string> = {
   ethics: '#26c6da', emotion: '#ec407a', general: '#78909c',
 }
 
+interface FeedItem {
+  type: 'user' | 'ai' | 'contradiction'
+  id: string
+  content: string
+  timestamp: string
+}
+
 function formatAI(text: string) {
   return text.split(/(\*[^*]+\*)/).map((part, i) => {
     if (part.startsWith('*') && part.endsWith('*')) {
-      return <span key={i} style={{ color: 'rgba(79,195,247,0.9)', fontStyle: 'italic' }}>{part.slice(1, -1)}</span>
+      return <span key={i} style={{ color: 'rgba(79,195,247,0.85)', fontStyle: 'italic' }}>{part.slice(1, -1)}</span>
     }
     return <span key={i}>{part}</span>
   })
@@ -43,15 +50,15 @@ export default function MirrorPage() {
     if (pending) {
       sessionStorage.removeItem('pending_thought')
       setInput(pending)
-      setTimeout(() => {
-        const form = document.querySelector('form')
-        if (form) form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
-      }, 300)
     }
   }, [])
 
-  useEffect(() => {
+  const scrollToBottom = () => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  useEffect(() => {
+    if (hasStarted) scrollToBottom()
   }, [feed, streamedText])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -70,7 +77,6 @@ export default function MirrorPage() {
     const uid = Date.now().toString()
     setFeed(prev => [...prev, { type: 'user', id: uid, content: thought, timestamp: new Date().toISOString() }])
 
-    // Extract beliefs silently
     try {
       const res = await fetch('/api/beliefs', {
         method: 'POST',
@@ -79,9 +85,14 @@ export default function MirrorPage() {
       })
       const data = await res.json()
       const extracted: Belief[] = data.beliefs || []
-      const contradictions: ContradictionResult[] = (data.contradictions || []).filter((c: ContradictionResult) => c.contradiction_score > 0.75)
-      setAllBeliefs(prev => [...extracted, ...prev])
-
+      const contradictions: ContradictionResult[] = (data.contradictions || []).filter(
+        (c: ContradictionResult) => c.contradiction_score > 0.75
+      )
+      setAllBeliefs(prev => {
+        const existingIds = new Set(prev.map(b => b.id))
+        const newOnes = extracted.filter(b => !existingIds.has(b.id))
+        return [...newOnes, ...prev]
+      })
       if (contradictions.length > 0) {
         setFeed(prev => [...prev, {
           type: 'contradiction',
@@ -92,7 +103,6 @@ export default function MirrorPage() {
       }
     } catch {}
 
-    // AI stream
     setStreamedText('')
     try {
       const res = await fetch('/api/dialogue', {
@@ -139,21 +149,23 @@ export default function MirrorPage() {
   }, [])
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-6 relative"
-      style={{ paddingLeft: hasStarted ? '80px' : '24px', transition: 'padding 0.5s ease' }}>
-
+    <div
+      className="flex flex-col"
+      style={{
+        minHeight: '100vh',
+        paddingLeft: hasStarted ? '72px' : '0',
+        paddingRight: '0',
+        transition: 'padding 0.5s ease',
+      }}
+    >
       {/* Memory button */}
       <AnimatePresence>
         {hasStarted && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="fixed top-5 right-6 z-30"
-          >
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed top-4 right-5 z-30">
             <button
               onClick={() => setShowMemory(!showMemory)}
               className="text-[10px] font-mono px-3 py-1.5 rounded-lg transition-all"
-              style={{ color: 'rgba(107,107,138,0.5)', border: '1px solid rgba(255,255,255,0.05)', background: 'rgba(5,5,10,0.8)' }}
+              style={{ color: 'rgba(107,107,138,0.5)', border: '1px solid rgba(255,255,255,0.05)', background: 'rgba(5,5,10,0.85)' }}
             >
               {allBeliefs.length} beliefs
             </button>
@@ -165,10 +177,8 @@ export default function MirrorPage() {
       <AnimatePresence>
         {showMemory && (
           <motion.div
-            initial={{ opacity: 0, y: -8, scale: 0.97 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -8, scale: 0.97 }}
-            className="fixed top-14 right-6 w-72 rounded-2xl p-4 z-30 max-h-72 overflow-y-auto"
+            initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+            className="fixed top-12 right-5 w-72 rounded-2xl p-4 z-30 max-h-72 overflow-y-auto"
             style={{ background: 'rgba(6,6,12,0.98)', border: '1px solid rgba(255,255,255,0.06)' }}
           >
             <div className="flex items-center justify-between mb-3">
@@ -195,14 +205,14 @@ export default function MirrorPage() {
         )}
       </AnimatePresence>
 
-      {/* TITLE — fades out on first message */}
+      {/* Pre-start hero */}
       <AnimatePresence>
         {!hasStarted && (
           <motion.div
-            key="title"
-            initial={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -30, transition: { duration: 0.6, ease: 'easeInOut' } }}
-            className="text-center mb-16"
+            key="hero"
+            exit={{ opacity: 0, y: -40, transition: { duration: 0.5, ease: 'easeInOut' } }}
+            className="flex flex-col items-center justify-center text-center px-6"
+            style={{ paddingTop: '20vh', paddingBottom: '8vh' }}
           >
             <p className="text-[10px] font-mono uppercase tracking-[0.3em] mb-8" style={{ color: 'rgba(107,107,138,0.4)' }}>
               Reflective Cognition Engine
@@ -220,7 +230,7 @@ export default function MirrorPage() {
         )}
       </AnimatePresence>
 
-      {/* FEED */}
+      {/* Feed — full width, scrollable */}
       <AnimatePresence>
         {hasStarted && (
           <motion.div
@@ -229,61 +239,60 @@ export default function MirrorPage() {
             animate={{ opacity: 1 }}
             transition={{ duration: 0.4 }}
             ref={feedRef}
-            className="w-full max-w-2xl mb-8 space-y-8 overflow-y-auto"
             style={{
-              maxHeight: 'calc(100vh - 180px)',
-              maskImage: 'linear-gradient(to bottom, transparent 0%, black 12%, black 100%)',
-              WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 12%, black 100%)',
+              flex: 1,
+              overflowY: 'auto',
+              paddingTop: '60px',
+              paddingBottom: '20px',
+              paddingLeft: '6vw',
+              paddingRight: '6vw',
+              scrollBehavior: 'smooth',
             }}
           >
             {feed.map((item, idx) => {
-              const isFarBack = idx < feed.length - 6
+              const age = feed.length - idx
+              const opacity = age <= 4 ? 1 : age <= 8 ? 0.55 : 0.25
               return (
                 <motion.div
                   key={item.id}
-                  initial={{ opacity: 0, y: 16 }}
-                  animate={{ opacity: isFarBack ? 0.25 : 1, y: 0 }}
-                  transition={{ duration: 0.4 }}
-                  style={{ transition: 'opacity 0.8s ease' }}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity, y: 0 }}
+                  transition={{ duration: 0.35 }}
+                  style={{ marginBottom: item.type === 'contradiction' ? '6px' : '32px', transition: 'opacity 1s ease' }}
                 >
-                  {/* User message — full width, above */}
+                  {/* User — muted, mono, full width */}
                   {item.type === 'user' && (
-                    <p
-                      className="leading-relaxed"
-                      style={{
-                        color: 'rgba(155,155,190,0.65)',
-                        fontSize: '15px',
-                        fontFamily: 'var(--font-mono)',
-                        paddingLeft: '2px',
-                      }}
-                    >
+                    <p style={{
+                      color: 'rgba(140,140,175,0.6)',
+                      fontSize: '14px',
+                      fontFamily: 'var(--font-mono)',
+                      lineHeight: 1.7,
+                      letterSpacing: '0.01em',
+                    }}>
                       {item.content}
                     </p>
                   )}
 
-                  {/* Contradiction — tiny, subtle */}
+                  {/* Contradiction — one subtle line */}
                   {item.type === 'contradiction' && (
-                    <div className="flex items-start gap-2 mt-1">
-                      <AlertTriangle size={9} style={{ color: 'rgba(255,71,87,0.4)', marginTop: '3px', flexShrink: 0 }} />
-                      <p style={{ color: 'rgba(107,107,138,0.45)', fontSize: '11px', fontFamily: 'monospace', lineHeight: 1.6 }}>
-                        You previously said: &ldquo;{item.content.length > 80 ? item.content.slice(0, 80) + '...' : item.content}&rdquo;
+                    <div className="flex items-center gap-2" style={{ marginTop: '-20px', marginBottom: '28px' }}>
+                      <AlertTriangle size={9} style={{ color: 'rgba(255,71,87,0.35)', flexShrink: 0 }} />
+                      <p style={{ color: 'rgba(107,107,138,0.4)', fontSize: '10px', fontFamily: 'monospace', lineHeight: 1.5 }}>
+                        Contradicts: &ldquo;{item.content.length > 90 ? item.content.slice(0, 90) + '...' : item.content}&rdquo;
                       </p>
                     </div>
                   )}
 
-                  {/* AI message — full width, below, bigger, display font */}
+                  {/* AI — large display font, full width, no box */}
                   {item.type === 'ai' && (
-                    <p
-                      className="leading-relaxed mt-2"
-                      style={{
-                        color: '#d8d8e8',
-                        fontSize: '18px',
-                        fontFamily: 'var(--font-display)',
-                        fontWeight: 300,
-                        letterSpacing: '0.01em',
-                        lineHeight: 1.8,
-                      }}
-                    >
+                    <p style={{
+                      color: '#dcdce8',
+                      fontSize: 'clamp(16px,2.2vw,22px)',
+                      fontFamily: 'var(--font-display)',
+                      fontWeight: 300,
+                      lineHeight: 1.85,
+                      letterSpacing: '0.015em',
+                    }}>
                       {formatAI(item.content)}
                     </p>
                   )}
@@ -291,18 +300,17 @@ export default function MirrorPage() {
               )
             })}
 
-            {/* Streaming AI */}
+            {/* Streaming */}
             {processing && streamedText && (
               <motion.p
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }}
                 style={{
-                  color: '#d8d8e8',
-                  fontSize: '18px',
+                  color: '#dcdce8',
+                  fontSize: 'clamp(16px,2.2vw,22px)',
                   fontFamily: 'var(--font-display)',
                   fontWeight: 300,
-                  lineHeight: 1.8,
-                  marginTop: '8px',
+                  lineHeight: 1.85,
+                  marginBottom: '32px',
                 }}
               >
                 {formatAI(streamedText)}
@@ -310,10 +318,12 @@ export default function MirrorPage() {
             )}
 
             {processing && !streamedText && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex gap-1.5 items-center mt-2">
-                <div className="w-1 h-1 rounded-full animate-pulse" style={{ background: 'rgba(171,71,188,0.6)' }} />
-                <div className="w-1 h-1 rounded-full animate-pulse" style={{ background: 'rgba(171,71,188,0.6)', animationDelay: '0.15s' }} />
-                <div className="w-1 h-1 rounded-full animate-pulse" style={{ background: 'rgba(171,71,188,0.6)', animationDelay: '0.3s' }} />
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                className="flex gap-1.5 items-center" style={{ marginBottom: '32px' }}>
+                {[0, 0.15, 0.3].map((delay, i) => (
+                  <div key={i} className="w-1 h-1 rounded-full animate-pulse"
+                    style={{ background: 'rgba(171,71,188,0.5)', animationDelay: delay + 's' }} />
+                ))}
               </motion.div>
             )}
 
@@ -322,14 +332,27 @@ export default function MirrorPage() {
         )}
       </AnimatePresence>
 
-      {/* INPUT — same as landing */}
-      <div className="w-full max-w-2xl" style={{ marginTop: hasStarted ? 0 : 0 }}>
+      {/* Input — full width, fixed at bottom */}
+      <div
+        style={{
+          position: hasStarted ? 'sticky' : 'relative',
+          bottom: 0,
+          padding: hasStarted ? '12px 6vw 24px' : '0 6vw 0',
+          background: hasStarted ? 'linear-gradient(to top, rgba(0,0,0,0.95) 60%, transparent)' : 'transparent',
+          marginTop: hasStarted ? 0 : undefined,
+          zIndex: 20,
+        }}
+      >
         <form onSubmit={handleSubmit}>
           <div className="relative group">
-            <div className="absolute inset-0 rounded-2xl opacity-0 group-focus-within:opacity-100 transition-opacity duration-500"
-              style={{ background: 'radial-gradient(ellipse, rgba(41,182,246,0.07) 0%, transparent 70%)', filter: 'blur(30px)', zIndex: -1 }} />
-            <div className="relative rounded-2xl transition-all duration-300 group-focus-within:border-white/10"
-              style={{ background: 'rgba(8,8,14,0.97)', border: '1px solid rgba(255,255,255,0.08)' }}>
+            <div
+              className="absolute inset-0 rounded-2xl opacity-0 group-focus-within:opacity-100 transition-opacity duration-500"
+              style={{ background: 'radial-gradient(ellipse, rgba(41,182,246,0.07) 0%, transparent 70%)', filter: 'blur(30px)', zIndex: -1 }}
+            />
+            <div
+              className="relative rounded-2xl transition-all duration-300"
+              style={{ background: 'rgba(8,8,14,0.97)', border: '1px solid rgba(255,255,255,0.09)' }}
+            >
               <textarea
                 ref={inputRef}
                 value={input}
@@ -343,7 +366,7 @@ export default function MirrorPage() {
                   color: '#e8e8f0',
                   fontSize: '15px',
                   caretColor: '#4fc3f7',
-                  minHeight: hasStarted ? '72px' : '100px',
+                  minHeight: hasStarted ? '70px' : '100px',
                   maxHeight: '200px',
                 }}
                 onInput={e => {
@@ -357,9 +380,12 @@ export default function MirrorPage() {
                 <span style={{ color: 'rgba(107,107,138,0.3)', fontSize: '10px', fontFamily: 'monospace' }}>
                   Enter to {hasStarted ? 'send' : 'begin'}
                 </span>
-                <button type="submit" disabled={!input.trim() || processing}
+                <button
+                  type="submit"
+                  disabled={!input.trim() || processing}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-all disabled:opacity-20"
-                  style={{ background: 'rgba(41,182,246,0.08)', border: '1px solid rgba(41,182,246,0.18)', color: '#4fc3f7', fontFamily: 'monospace', fontSize: '12px' }}>
+                  style={{ background: 'rgba(41,182,246,0.08)', border: '1px solid rgba(41,182,246,0.18)', color: '#4fc3f7', fontFamily: 'monospace', fontSize: '12px' }}
+                >
                   {processing ? <Loader2 size={12} className="animate-spin" /> : <ArrowRight size={12} />}
                 </button>
               </div>
