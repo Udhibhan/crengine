@@ -1,13 +1,12 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
-import dynamic from 'next/dynamic'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Network, Info, X } from 'lucide-react'
 import type { Belief, GraphData, GraphNode, GraphLink } from '@/lib/types'
 
-// Dynamic import to avoid SSR issues with canvas
-const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), { ssr: false })
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let ForceGraph2D: any = null
 
 const CATEGORY_COLORS: Record<string, string> = {
   philosophy: '#ab47bc',
@@ -33,7 +32,6 @@ interface BeliefRelation {
   belief_id_2: string
   relation_type: string
   strength_score: number
-  explanation?: string
 }
 
 export default function GraphPage() {
@@ -41,7 +39,15 @@ export default function GraphPage() {
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null)
   const [loading, setLoading] = useState(true)
   const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null)
-  const graphRef = useRef<{ d3Force: (name: string, force: unknown) => unknown } | null>(null)
+  const [graphLoaded, setGraphLoaded] = useState(false)
+  const graphRef = useRef(null)
+
+  useEffect(() => {
+    import('react-force-graph-2d').then((mod) => {
+      ForceGraph2D = mod.default
+      setGraphLoaded(true)
+    })
+  }, [])
 
   useEffect(() => {
     Promise.all([
@@ -91,7 +97,6 @@ export default function GraphPage() {
       const isSelected = selectedNode?.id === node.id
       const isHovered = hoveredNode?.id === node.id
 
-      // Glow effect
       if (isSelected || isHovered) {
         const gradient = ctx.createRadialGradient(
           node.x || 0, node.y || 0, 0,
@@ -105,21 +110,17 @@ export default function GraphPage() {
         ctx.fill()
       }
 
-      // Node circle
       ctx.beginPath()
       ctx.arc(node.x || 0, node.y || 0, radius, 0, 2 * Math.PI)
       ctx.fillStyle = isSelected ? color : `${color}99`
       ctx.fill()
-
-      // Node border
       ctx.strokeStyle = color
       ctx.lineWidth = isSelected ? 2 : 1
       ctx.stroke()
 
-      // Label for hovered/selected
       if (isHovered || isSelected) {
         const text = node.content.length > 40 ? node.content.slice(0, 40) + '...' : node.content
-        ctx.font = '4px "JetBrains Mono", monospace'
+        ctx.font = '4px sans-serif'
         ctx.fillStyle = '#e8e8f0'
         ctx.textAlign = 'center'
         ctx.fillText(text, node.x || 0, (node.y || 0) + radius + 8)
@@ -128,15 +129,14 @@ export default function GraphPage() {
     [selectedNode, hoveredNode]
   )
 
+  const isReady = !loading && graphLoaded
+
   return (
     <div className="max-w-7xl mx-auto">
-      {/* Header */}
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
         <div className="flex items-center gap-2 mb-2">
           <Network size={14} className="text-electric" />
-          <span className="text-electric text-xs font-mono uppercase tracking-widest">
-            Belief Graph
-          </span>
+          <span className="text-electric text-xs font-mono uppercase tracking-widest">Belief Graph</span>
         </div>
         <h1 className="font-display text-5xl text-bright font-light">Your Mind, Mapped</h1>
         <p className="text-dim text-sm mt-2">
@@ -144,7 +144,6 @@ export default function GraphPage() {
         </p>
       </motion.div>
 
-      {/* Legend */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -165,7 +164,6 @@ export default function GraphPage() {
       </motion.div>
 
       <div className="flex gap-4">
-        {/* Graph canvas */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -173,7 +171,7 @@ export default function GraphPage() {
           className="flex-1 glass rounded-2xl overflow-hidden"
           style={{ height: '70vh' }}
         >
-          {loading ? (
+          {!isReady ? (
             <div className="flex items-center justify-center h-full">
               <div className="flex flex-col items-center gap-3">
                 <div className="w-8 h-8 border-2 border-electric/30 border-t-electric rounded-full animate-spin" />
@@ -184,34 +182,23 @@ export default function GraphPage() {
             <div className="flex flex-col items-center justify-center h-full">
               <Network size={40} className="text-ghost opacity-20 mb-3" />
               <p className="text-ghost text-sm">No beliefs to visualize yet.</p>
-              <p className="text-dim text-xs font-mono mt-1">
-                Add at least 3 beliefs to see the graph.
-              </p>
+              <p className="text-dim text-xs font-mono mt-1">Add at least 3 beliefs to see the graph.</p>
             </div>
           ) : (
             <ForceGraph2D
-              ref={graphRef as React.MutableRefObject<never>}
-              graphData={graphData as unknown as Parameters<typeof ForceGraph2D>[0]['graphData']}
+              ref={graphRef}
+              graphData={graphData}
               backgroundColor="transparent"
-              nodeCanvasObject={paintNode as unknown as (node: object, ctx: CanvasRenderingContext2D, globalScale: number) => void}
+              nodeCanvasObject={paintNode}
               nodeCanvasObjectMode={() => 'replace'}
-              onNodeClick={handleNodeClick as unknown as (node: object, event: MouseEvent) => void}
-              onNodeHover={handleNodeHover as unknown as (node: object | null, previousNode: object | null) => void}
-              linkColor={(link: unknown) => {
-                const l = link as GraphLink
-                return RELATION_COLORS[l.relation_type] || '#4fc3f7'
-              }}
-              linkWidth={(link: unknown) => {
-                const l = link as GraphLink
-                return (l.strength_score || 0.5) * 2
-              }}
+              onNodeClick={handleNodeClick}
+              onNodeHover={handleNodeHover}
+              linkColor={(link: GraphLink) => RELATION_COLORS[link.relation_type] || '#4fc3f7'}
+              linkWidth={(link: GraphLink) => (link.strength_score || 0.5) * 2}
               linkOpacity={0.6}
               linkDirectionalParticles={2}
               linkDirectionalParticleWidth={1.5}
-              linkDirectionalParticleColor={(link: unknown) => {
-                const l = link as GraphLink
-                return RELATION_COLORS[l.relation_type] || '#4fc3f7'
-              }}
+              linkDirectionalParticleColor={(link: GraphLink) => RELATION_COLORS[link.relation_type] || '#4fc3f7'}
               cooldownTicks={100}
               d3AlphaDecay={0.02}
               d3VelocityDecay={0.3}
@@ -219,67 +206,51 @@ export default function GraphPage() {
           )}
         </motion.div>
 
-        {/* Side panel — selected node */}
-        <AnimatedPanel node={selectedNode} onClose={() => setSelectedNode(null)} />
+        <AnimatePresence>
+          {selectedNode && (
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className="w-72 glass rounded-2xl p-6 h-fit self-start sticky top-0"
+            >
+              <div className="flex items-start justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Info size={14} className="text-electric" />
+                  <span className="text-electric text-xs font-mono uppercase tracking-widest">Belief</span>
+                </div>
+                <button onClick={() => setSelectedNode(null)} className="text-ghost hover:text-pale transition-colors">
+                  <X size={14} />
+                </button>
+              </div>
+              <p className="text-bright text-sm leading-relaxed mb-4">{selectedNode.content}</p>
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-ghost text-xs font-mono">Category</span>
+                  <span className="text-xs font-mono capitalize" style={{ color: CATEGORY_COLORS[selectedNode.category] || '#78909c' }}>
+                    {selectedNode.category}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-ghost text-xs font-mono">Confidence</span>
+                  <span className="text-pale text-xs font-mono">{Math.round(selectedNode.confidence_score * 100)}%</span>
+                </div>
+                <div className="mt-3">
+                  <div className="h-1.5 rounded-full bg-border overflow-hidden">
+                    <div
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${selectedNode.confidence_score * 100}%`,
+                        background: `linear-gradient(90deg, ${CATEGORY_COLORS[selectedNode.category]}80, ${CATEGORY_COLORS[selectedNode.category]})`,
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
-  )
-}
-
-function AnimatedPanel({ node, onClose }: { node: GraphNode | null; onClose: () => void }) {
-  if (!node) return null
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, x: 20 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: 20 }}
-      className="w-72 glass rounded-2xl p-6 h-fit self-start sticky top-0"
-    >
-      <div className="flex items-start justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <Info size={14} className="text-electric" />
-          <span className="text-electric text-xs font-mono uppercase tracking-widest">
-            Belief
-          </span>
-        </div>
-        <button onClick={onClose} className="text-ghost hover:text-pale transition-colors">
-          <X size={14} />
-        </button>
-      </div>
-
-      <p className="text-bright text-sm leading-relaxed mb-4">{node.content}</p>
-
-      <div className="space-y-2">
-        <div className="flex justify-between">
-          <span className="text-ghost text-xs font-mono">Category</span>
-          <span
-            className="text-xs font-mono capitalize"
-            style={{
-              color: CATEGORY_COLORS[node.category] || '#78909c',
-            }}
-          >
-            {node.category}
-          </span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-ghost text-xs font-mono">Confidence</span>
-          <span className="text-pale text-xs font-mono">
-            {Math.round(node.confidence_score * 100)}%
-          </span>
-        </div>
-        <div className="mt-3">
-          <div className="h-1.5 rounded-full bg-border overflow-hidden">
-            <div
-              className="h-full rounded-full transition-all"
-              style={{
-                width: `${node.confidence_score * 100}%`,
-                background: `linear-gradient(90deg, ${CATEGORY_COLORS[node.category]}80, ${CATEGORY_COLORS[node.category]})`,
-              }}
-            />
-          </div>
-        </div>
-      </div>
-    </motion.div>
   )
 }
