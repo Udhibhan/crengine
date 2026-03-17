@@ -111,7 +111,7 @@ Return ONLY this JSON structure:
 }
 
 Rules:
-- Only include contradictions with score > 0.35
+- Only include contradictions with score > 0.65
 - 1.0 = direct logical opposition
 - 0.35-0.6 = tension or inconsistency
 - Do NOT flag differences in emphasis as contradictions
