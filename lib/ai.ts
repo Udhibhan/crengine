@@ -7,9 +7,7 @@ import type {
   ChatMessage,
 } from './types'
 
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY!,
-})
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY! })
 
 const FAST_MODEL = 'llama-3.1-8b-instant'
 const DEEP_MODEL = 'llama-3.3-70b-versatile'
@@ -40,45 +38,32 @@ function extractObject(text: string): string | null {
 }
 
 export async function extractBeliefs(rawText: string): Promise<ExtractedBelief[]> {
+  const userPrompt = 'Extract ALL distinct beliefs from this text. Return ONLY a JSON array.\n\n'
+    + 'Each object must have:\n'
+    + '- "content": string\n'
+    + '- "category": one of: philosophy, identity, habit, relationships, career, worldview, ethics, emotion, general\n'
+    + '- "confidence_score": float 0.0 to 1.0\n\n'
+    + 'Rules: Extract 1-8 beliefs. Only actual claims not questions.\n'
+    + 'vague thoughts = 0.3-0.5 confidence. Certain claims = 0.8-1.0 confidence.\n\n'
+    + 'Text: "' + rawText + '"\n\n'
+    + 'Return ONLY the JSON array, nothing else.'
+
   const response = await groq.chat.completions.create({
     model: FAST_MODEL,
     max_tokens: 1500,
     temperature: 0.3,
     messages: [
-      {
-        role: 'system',
-        content: 'You are a cognitive analyst. Return ONLY a raw JSON array. No markdown, no explanation, no code fences.',
-      },
-      {
-        role: 'user',
-        content: `Extract ALL distinct beliefs from this text. Return ONLY a JSON array.
-
-Each object must have:
-- "content": string — the belief as a clear direct statement
-- "category": string — one of: philosophy, identity, habit, relationships, career, worldview, ethics, emotion, general
-- "confidence_score": float — 0.0 to 1.0
-
-Rules:
-- Extract 1-8 beliefs
-- Only extract actual claims, not questions
-- "I think maybe..." = confidence 0.3-0.5
-- "I know that..." = confidence 0.8-1.0
-
-Text: "${rawText}"
-
-Return ONLY the JSON array, nothing else.`,
-      },
+      { role: 'system', content: 'You are a cognitive analyst. Return ONLY a raw JSON array. No markdown, no explanation.' },
+      { role: 'user', content: userPrompt },
     ],
   })
 
   const content = response.choices[0]?.message?.content || ''
   try {
-    const cleaned = cleanJSON(content)
-    const arr = extractArray(cleaned)
+    const arr = extractArray(cleanJSON(content))
     if (!arr) return []
     return JSON.parse(arr)
   } catch {
-    console.error('Belief extraction parse failed:', content)
     return []
   }
 }
@@ -87,60 +72,38 @@ export async function detectContradictions(
   newBelief: string,
   existingBeliefs: Belief[]
 ): Promise<ContradictionAnalysis> {
-  if (existingBeliefs.length === 0) {
-    return { has_contradiction: false, contradictions: [] }
-  }
+  if (existingBeliefs.length === 0) return { has_contradiction: false, contradictions: [] }
 
-  const beliefsToCheck = existingBeliefs.slice(-50)
+  const beliefsJSON = JSON.stringify(
+    existingBeliefs.slice(-50).map((b) => ({ id: b.id, content: b.content, category: b.category }))
+  )
+
+  const userPrompt = 'Detect ONLY genuine logical contradictions.\n\n'
+    + 'New belief: "' + newBelief + '"\n\n'
+    + 'Existing beliefs:\n' + beliefsJSON + '\n\n'
+    + 'STRICT RULES:\n'
+    + '- Both beliefs must be about the EXACT SAME topic\n'
+    + '- They must make directly OPPOSING claims\n'
+    + '- Different topics = NOT a contradiction\n'
+    + '- Only flag if score is above 0.65\n'
+    + '- When in doubt, do NOT flag\n\n'
+    + 'Return ONLY this exact JSON structure:\n'
+    + '{"has_contradiction":false,"contradictions":[]}\n\n'
+    + 'Return ONLY raw JSON nothing else.'
 
   const response = await groq.chat.completions.create({
     model: FAST_MODEL,
     max_tokens: 2000,
     temperature: 0.2,
     messages: [
-      {
-        role: 'system',
-        content: 'You are a strict logical contradiction detector. Return ONLY raw JSON. No markdown, no explanation.',
-      },
-      {
-        role: 'user',
-        content: `Detect ONLY genuine logical contradictions between the new belief and existing beliefs.
-
-New belief: "${newBelief}"
-
-Existing beliefs:
-${JSON.stringify(beliefsToCheck.map((b) => ({ id: b.id, content: b.content, category: b.category })))}
-
-STRICT RULES:
-- Both beliefs must be about the EXACT SAME topic
-- They must make directly OPPOSING claims about that same topic
-- Different topics = NOT a contradiction
-- Nuance or context differences = NOT a contradiction
-- Only flag if contradiction_score is above 0.65
-- When in doubt, do NOT flag it
-
-Return ONLY this JSON:
-{
-  "has_contradiction": boolean,
-  "contradictions": [
-    {
-      "belief_id": "uuid",
-      "belief_content": "the contradicting belief",
-      "contradiction_score": 0.0-1.0,
-      "explanation": "one precise sentence"
-    }
-  ]
-}
-
-Return ONLY raw JSON, nothing else.`,
-      },
+      { role: 'system', content: 'You detect logical contradictions. Return ONLY raw JSON. No markdown.' },
+      { role: 'user', content: userPrompt },
     ],
   })
 
   const content = response.choices[0]?.message?.content || ''
   try {
-    const cleaned = cleanJSON(content)
-    const obj = extractObject(cleaned)
+    const obj = extractObject(cleanJSON(content))
     if (!obj) return { has_contradiction: false, contradictions: [] }
     return JSON.parse(obj) as ContradictionAnalysis
   } catch {
@@ -153,38 +116,21 @@ export async function createDialogueStream(
   conversationHistory: ChatMessage[],
   userBeliefs: Belief[]
 ): Promise<ReadableStream<Uint8Array>> {
-  const beliefContext =
-    userBeliefs.length > 0
-      ? userBeliefs
-          .slice(-30)
-          .map(
-            (b, i) =>
-              `[${i + 1}] (${b.category}, confidence: ${Math.round(b.confidence_score * 100)}%) "${b.content}"`
-          )
-          .join('\n')
-      : 'No beliefs recorded yet.'
+  const beliefContext = userBeliefs.length > 0
+    ? userBeliefs.slice(-30).map((b, i) =>
+        '[' + (i + 1) + '] (' + b.category + ', ' + Math.round(b.confidence_score * 100) + '%) "' + b.content + '"'
+      ).join('\n')
+    : 'No beliefs recorded yet.'
 
-  const systemPrompt = `You are the Reflective Cognition Engine — a philosophical adversary, not a companion. A cognitive mirror that reflects back with unflinching precision.
-
-Your character:
-- Ruthlessly analytical, intellectually rigorous
-- You do NOT comfort, validate, or agree for the sake of harmony
-- You CHALLENGE every assumption, especially unchallenged ones
-- Speak with precision, no filler, no pleasantries, no empty empathy
-- You are fascinated by the user's internal contradictions, treat them as data
-- Ask exactly ONE sharp destabilizing question at the end of each response
-- Quote the user's actual beliefs when referencing them
-- Tone: Socrates + Nietzsche + cold logic engine
-
-The user's belief system:
-${beliefContext}
-
-Rules:
-- Keep responses 150-300 words
-- Never say I understand or That's a great point
-- When you spot a contradiction with a recorded belief, name it explicitly
-- End EVERY response with a single probing question wrapped in *asterisks*
-- Do not lecture, engage`
+  const systemPrompt = 'You are the Reflective Cognition Engine, a philosophical adversary not a companion.\n\n'
+    + 'Character: ruthlessly analytical, never comforts or validates, challenges every assumption,\n'
+    + 'speaks with precision, no filler. Tone: Socrates plus Nietzsche plus cold logic.\n\n'
+    + 'User belief system:\n' + beliefContext + '\n\n'
+    + 'Rules:\n'
+    + '- 150-300 words per response\n'
+    + '- Never say I understand or Thats a great point\n'
+    + '- Name contradictions with recorded beliefs explicitly\n'
+    + '- End EVERY response with one probing question in *asterisks*'
 
   const messages = [
     ...conversationHistory.slice(-20).map((m) => ({
@@ -199,10 +145,7 @@ Rules:
     max_tokens: 1024,
     temperature: 0.8,
     stream: true,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      ...messages,
-    ],
+    messages: [{ role: 'system', content: systemPrompt }, ...messages],
   })
 
   return new ReadableStream<Uint8Array>({
@@ -222,59 +165,44 @@ export async function generateInsights(
   relations: Array<{ relation_type: string; strength_score: number; explanation?: string }>
 ): Promise<AIInsight[]> {
   if (beliefs.length < 3) {
-    return [
-      {
-        type: 'pattern',
-        description: 'Add more beliefs to unlock cognitive pattern analysis. The engine needs at least 3 data points.',
-        severity: 'low',
-        related_belief_ids: [],
-      },
-    ]
+    return [{
+      type: 'pattern',
+      description: 'Add more beliefs to unlock cognitive pattern analysis. Need at least 3 data points.',
+      severity: 'low',
+      related_belief_ids: [],
+    }]
   }
+
+  const beliefsJSON = JSON.stringify(
+    beliefs.map((b) => ({ id: b.id, content: b.content, category: b.category, confidence_score: b.confidence_score }))
+  )
+
+  const userPrompt = 'Analyze this belief system. Return insights as a JSON array.\n\n'
+    + 'BELIEFS: ' + beliefsJSON + '\n\n'
+    + 'RELATIONS: ' + JSON.stringify(relations) + '\n\n'
+    + 'Generate 4-7 insights. Return ONLY a JSON array:\n'
+    + '[{"type":"contradiction","description":"string","severity":"high","related_belief_ids":["uuid"]}]\n\n'
+    + 'type = contradiction or bias or pattern\n'
+    + 'severity = low or medium or high\n'
+    + 'Be specific, cite actual belief content.\n'
+    + 'Return ONLY the raw JSON array, nothing else.'
 
   const response = await groq.chat.completions.create({
     model: DEEP_MODEL,
     max_tokens: 3000,
     temperature: 0.4,
     messages: [
-      {
-        role: 'system',
-        content: 'You are a cognitive pattern analyst. Return ONLY a raw JSON array. No markdown, no explanation.',
-      },
-      {
-        role: 'user',
-        content: `Analyze this belief system and return insights as a JSON array.
-
-BELIEFS (${beliefs.length} total):
-${JSON.stringify(beliefs.map((b) => ({ id: b.id, content: b.content, category: b.category, confidence_score: b.confidence_score })))}
-
-RELATIONS: ${JSON.stringify(relations)}
-
-Generate 4-7 precise insights. Return ONLY a JSON array:
-[
-  {
-    "type": "contradiction" or "bias" or "pattern",
-    "description": "2-3 sentence specific insight naming actual beliefs",
-    "severity": "low" or "medium" or "high",
-    "related_belief_ids": ["uuid1", "uuid2"]
-  }
-]
-
-Look for: real logical contradictions, confirmation bias, blind spots, recurring themes, confidence asymmetry.
-Be specific, cite actual belief content.
-Return ONLY the raw JSON array, nothing else.`,
-      },
+      { role: 'system', content: 'You are a cognitive pattern analyst. Return ONLY a raw JSON array. No markdown.' },
+      { role: 'user', content: userPrompt },
     ],
   })
 
   const content = response.choices[0]?.message?.content || ''
   try {
-    const cleaned = cleanJSON(content)
-    const arr = extractArray(cleaned)
+    const arr = extractArray(cleanJSON(content))
     if (!arr) return []
     return JSON.parse(arr)
   } catch {
-    console.error('Insights parse failed:', content)
     return []
   }
 }
@@ -282,54 +210,35 @@ Return ONLY the raw JSON array, nothing else.`,
 export async function detectRelations(
   newBelief: Belief,
   existingBeliefs: Belief[]
-): Promise
-  Array<{
-    belief_id: string
-    relation_type: 'supports' | 'contradicts' | 'evolves_from'
-    strength_score: number
-    explanation: string
-  }>
-> {
+): Promise<Array<{ belief_id: string; relation_type: 'supports' | 'contradicts' | 'evolves_from'; strength_score: number; explanation: string }>> {
   if (existingBeliefs.length === 0) return []
+
+  const existingJSON = JSON.stringify(
+    existingBeliefs.slice(-30).map((b) => ({ id: b.id, content: b.content, category: b.category }))
+  )
+
+  const userPrompt = 'How does this new belief relate to existing beliefs?\n\n'
+    + 'New belief: {"id":"' + newBelief.id + '","content":"' + newBelief.content + '","category":"' + newBelief.category + '"}\n\n'
+    + 'Existing: ' + existingJSON + '\n\n'
+    + 'Return ONLY a JSON array, max 5 items, strength_score above 0.3:\n'
+    + '[{"belief_id":"uuid","relation_type":"supports","strength_score":0.8,"explanation":"string"}]\n\n'
+    + 'relation_type = supports or contradicts or evolves_from\n'
+    + 'Only include relations where beliefs are about the same topic.\n'
+    + 'Return ONLY the raw JSON array, nothing else.'
 
   const response = await groq.chat.completions.create({
     model: FAST_MODEL,
     max_tokens: 2000,
     temperature: 0.2,
     messages: [
-      {
-        role: 'system',
-        content: 'You detect relationships between beliefs. Return ONLY a raw JSON array. No markdown.',
-      },
-      {
-        role: 'user',
-        content: `How does this new belief relate to existing beliefs?
-
-New belief: { "id": "${newBelief.id}", "content": "${newBelief.content}", "category": "${newBelief.category}" }
-
-Existing beliefs:
-${JSON.stringify(existingBeliefs.slice(-30).map((b) => ({ id: b.id, content: b.content, category: b.category })))}
-
-Return ONLY a JSON array of significant relations (strength_score above 0.3), max 5:
-[
-  {
-    "belief_id": "uuid",
-    "relation_type": "supports" or "contradicts" or "evolves_from",
-    "strength_score": 0.0-1.0,
-    "explanation": "one precise sentence"
-  }
-]
-
-Only include relations where beliefs are genuinely about the same topic.
-Return ONLY the raw JSON array, nothing else.`,
-      },
+      { role: 'system', content: 'You detect belief relationships. Return ONLY a raw JSON array. No markdown.' },
+      { role: 'user', content: userPrompt },
     ],
   })
 
   const content = response.choices[0]?.message?.content || ''
   try {
-    const cleaned = cleanJSON(content)
-    const arr = extractArray(cleaned)
+    const arr = extractArray(cleanJSON(content))
     if (!arr) return []
     return JSON.parse(arr)
   } catch {
@@ -337,49 +246,38 @@ Return ONLY the raw JSON array, nothing else.`,
   }
 }
 
-export async function generateActionPlan(
-  beliefs: Belief[],
-  insights: AIInsight[]
-): Promise<string> {
-  if (beliefs.length < 2) {
-    return 'Record more beliefs to unlock your personalized action plan.'
-  }
+export async function generateActionPlan(beliefs: Belief[], insights: AIInsight[]): Promise<string> {
+  if (beliefs.length < 2) return 'Record more beliefs to unlock your personalized action plan.'
+
+  const beliefLines = beliefs.slice(-20)
+    .map((b) => '- [' + b.category + '] "' + b.content + '" (confidence: ' + Math.round(b.confidence_score * 100) + '%)')
+    .join('\n')
+
+  const insightLines = insights
+    .map((i) => '- [' + i.type + '/' + i.severity + '] ' + i.description)
+    .join('\n')
+
+  const userPrompt = 'Generate a precise action plan based on this belief system.\n\n'
+    + 'BELIEFS:\n' + beliefLines + '\n\n'
+    + 'PATTERNS:\n' + insightLines + '\n\n'
+    + 'Write in markdown with exactly these sections:\n\n'
+    + '## Immediate Actions (this week)\n'
+    + '3-4 specific concrete actions\n\n'
+    + '## Belief Experiments (this month)\n'
+    + '2-3 experiments to test beliefs in practice\n\n'
+    + '## Blind Spots to Investigate\n'
+    + '2-3 suspicious gaps\n\n'
+    + '## Warning\n'
+    + 'One blunt statement about the most dangerous pattern\n\n'
+    + 'Be specific. Calibrate to THIS persons actual beliefs.'
 
   const response = await groq.chat.completions.create({
     model: DEEP_MODEL,
     max_tokens: 1500,
     temperature: 0.6,
     messages: [
-      {
-        role: 'system',
-        content: 'You are a precision cognitive coach. Generate structured action plans in markdown.',
-      },
-      {
-        role: 'user',
-        content: `Generate a precise action plan based on this person's belief system.
-
-BELIEFS:
-${beliefs.slice(-20).map((b) => `- [${b.category}] "${b.content}" (confidence: ${Math.round(b.confidence_score * 100)}%)`).join('\n')}
-
-PATTERNS:
-${insights.map((i) => `- [${i.type}/${i.severity}] ${i.description}`).join('\n')}
-
-Write in markdown with exactly these sections:
-
-## Immediate Actions (this week)
-3-4 specific concrete actions
-
-## Belief Experiments (this month)
-2-3 experiments to test beliefs in practice
-
-## Blind Spots to Investigate
-2-3 suspicious gaps in the belief system
-
-## Warning
-One blunt statement about the most dangerous pattern
-
-Be specific, not generic. Calibrate to THIS person's actual beliefs.`,
-      },
+      { role: 'system', content: 'You are a precision cognitive coach. Generate action plans in markdown.' },
+      { role: 'user', content: userPrompt },
     ],
   })
 
