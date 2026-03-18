@@ -56,7 +56,7 @@ export default function LandingPage() {
   )
 
   return (
-    <main className="min-h-screen bg-void relative overflow-x-hidden">
+    <main className="min-h-screen bg-void relative" style={{ overflowX: "hidden" }}>
       <div className="fixed inset-0 pointer-events-none" style={{ zIndex: 0 }}>
         <div className="absolute top-1/3 left-1/2 -translate-x-1/2 w-[900px] h-[600px]"
           style={{ background: 'radial-gradient(ellipse, rgba(41,182,246,0.05) 0%, transparent 65%)' }} />
