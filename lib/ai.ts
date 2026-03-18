@@ -38,13 +38,21 @@ function extractObject(text: string): string | null {
 }
 
 export async function extractBeliefs(rawText: string): Promise<ExtractedBelief[]> {
-  const userPrompt = 'Extract ALL distinct beliefs from this text. Return ONLY a JSON array.\n\n'
+  const userPrompt = 'Analyze this text and extract only genuine beliefs, convictions, or personal positions.\n\n'
+    + 'SKIP IT ENTIRELY and return [] if the text is:\n'
+    + '- A simple reply like yes, no, okay, thanks, I agree, sure, of course\n'
+    + '- A question with no stated position\n'
+    + '- Small talk or filler with no actual claim\n'
+    + '- A continuation word or phrase with no new belief\n\n'
+    + 'EXTRACT if the text contains a personal conviction, value, opinion, or worldview claim.\n\n'
     + 'Each object must have:\n'
-    + '- "content": string — the belief as a clear direct statement\n'
+    + '- "content": the belief as one clear declarative sentence\n'
     + '- "category": one of: philosophy, identity, habit, relationships, career, worldview, ethics, emotion, general\n'
-    + '- "confidence_score": float 0.0 to 1.0\n\n'
-    + 'Rules: Extract 1-8 beliefs. Only actual claims not questions.\n'
-    + 'vague thoughts = 0.3-0.5 confidence. Certain claims = 0.8-1.0 confidence.\n\n'
+    + '- "confidence_score": precise float e.g. 0.73 or 0.41 — NOT round numbers like 0.5 or 0.8\n\n'
+    + 'Rules:\n'
+    + '- Extract 1-4 beliefs maximum. Prefer fewer, more precise beliefs over many vague ones.\n'
+    + '- Do NOT split one belief into multiple similar beliefs.\n'
+    + '- Do NOT extract the same idea twice with different words.\n\n'
     + 'Text: "' + rawText + '"\n\n'
     + 'Return ONLY the JSON array, nothing else.'
 
@@ -75,43 +83,46 @@ export async function detectContradictions(
   if (existingBeliefs.length === 0) return { has_contradiction: false, contradictions: [] }
 
   const beliefsJSON = JSON.stringify(
-    existingBeliefs.slice(-50).map((b) => ({ id: b.id, content: b.content, category: b.category }))
+    existingBeliefs.slice(-30).map((b) => ({ id: b.id, content: b.content }))
   )
 
-  const userPrompt = 'You are comparing beliefs that ONE person has stated about themselves.\n\n'
-    + 'New belief this person just stated: "' + newBelief + '"\n\n'
-    + 'Other beliefs this same person has previously stated:\n' + beliefsJSON + '\n\n'
-    + 'YOUR ONLY JOB: find cases where THIS PERSON directly contradicts THEMSELVES.\n\n'
-    + 'ABSOLUTE RULES:\n'
-    + '- You have NO opinion. You do NOT know what is philosophically consistent or inconsistent in general.\n'
-    + '- You ONLY look at what this specific person has said.\n'
-    + '- A contradiction = this person said X, and now they are saying the direct opposite of X.\n'
-    + '- Both statements must be about the EXACT SAME subject.\n'
-    + '- Different subjects = never a contradiction, even if you personally think they conflict.\n'
-    + '- DO NOT use external philosophical knowledge or general opinions.\n'
-    + '- DO NOT flag beliefs from different categories as contradictions.\n'
-    + '- Only flag if score is above 0.75.\n'
-    + '- If the two beliefs could both be true at the same time = not a contradiction.\n'
-    + '- When in doubt = not a contradiction.\n\n'
-    + 'Return ONLY this JSON:\n'
-    + '{"has_contradiction":false,"contradictions":[]}\n\n'
-    + 'Return ONLY raw JSON, nothing else.'
+  const userPrompt = 'One person has made these statements over time. Find ONLY cases where they directly contradict themselves.\n\n'
+    + 'NEW STATEMENT: "' + newBelief + '"\n\n'
+    + 'PREVIOUS STATEMENTS:\n' + beliefsJSON + '\n\n'
+    + 'A REAL contradiction means:\n'
+    + '- Statement A says X is true\n'
+    + '- Statement B says X is false or impossible\n'
+    + '- They are about the EXACT SAME specific thing\n'
+    + '- They CANNOT both be true at the same time\n\n'
+    + 'NOT a contradiction:\n'
+    + '- Different topics\n'
+    + '- Different contexts or situations\n'
+    + '- Nuance or qualification\n'
+    + '- Things that could both be true\n'
+    + '- Your own opinion about what conflicts\n\n'
+    + 'If you find a real contradiction, estimate the score as a precise decimal like 0.83 or 0.91 based on how directly opposed they are. Do not use round numbers like 0.8 or 0.6.\n\n'
+    + 'If there is no clear self-contradiction, return has_contradiction: false.\n\n'
+    + 'Return ONLY raw JSON: {"has_contradiction":false,"contradictions":[]}'
 
   const response = await groq.chat.completions.create({
     model: FAST_MODEL,
-    max_tokens: 2000,
-    temperature: 0.1,
+    max_tokens: 1000,
+    temperature: 0.0,
     messages: [
-      { role: 'system', content: 'You compare a persons own statements to find self-contradictions only. Return ONLY raw JSON. No markdown. No external opinions.' },
+      { role: 'system', content: 'You find only genuine self-contradictions. Return ONLY raw JSON. Default to no contradiction when unsure.' },
       { role: 'user', content: userPrompt },
     ],
   })
 
-  const content = response.choices[0]?.message?.content || ''
+  const raw = response.choices[0]?.message?.content || ''
   try {
-    const obj = extractObject(cleanJSON(content))
+    const obj = extractObject(cleanJSON(raw))
     if (!obj) return { has_contradiction: false, contradictions: [] }
-    return JSON.parse(obj) as ContradictionAnalysis
+    const parsed = JSON.parse(obj) as ContradictionAnalysis
+    // Filter to only high-confidence contradictions
+    parsed.contradictions = parsed.contradictions.filter(c => c.contradiction_score >= 0.80)
+    parsed.has_contradiction = parsed.contradictions.length > 0
+    return parsed
   } catch {
     return { has_contradiction: false, contradictions: [] }
   }
@@ -233,14 +244,19 @@ export async function detectRelations(
     existingBeliefs.slice(-30).map((b) => ({ id: b.id, content: b.content, category: b.category }))
   )
 
-  const userPrompt = 'How does this new belief relate to existing beliefs from the same person?\n\n'
-    + 'New belief: {"id":"' + newBelief.id + '","content":"' + newBelief.content + '","category":"' + newBelief.category + '"}\n\n'
-    + 'Existing: ' + existingJSON + '\n\n'
-    + 'Return ONLY a JSON array, max 5 items, strength_score above 0.3:\n'
-    + '[{"belief_id":"uuid","relation_type":"supports","strength_score":0.8,"explanation":"string"}]\n\n'
-    + 'relation_type = supports or contradicts or evolves_from\n'
-    + 'Only include where beliefs are clearly about the same topic.\n'
-    + 'Return ONLY the raw JSON array, nothing else.'
+  const userPrompt = 'Does this new belief have a clear, specific relationship to any existing beliefs?\n\n'
+    + 'New belief: "' + newBelief.content + '"\n\n'
+    + 'Existing beliefs:\n' + existingJSON + '\n\n'
+    + 'Only include a relation if:\n'
+    + '- Both beliefs are clearly about the same specific topic\n'
+    + '- The relationship is obvious and strong\n'
+    + '- strength_score is a precise decimal like 0.87, not a round number\n\n'
+    + 'Types:\n'
+    + '- supports: new belief reinforces the existing one\n'
+    + '- contradicts: new belief directly opposes the existing one (only if same topic, opposite claim)\n'
+    + '- evolves_from: new belief is a development of the existing one\n\n'
+    + 'If no clear strong relation exists, return [].\n'
+    + 'Max 2 relations. Return ONLY the raw JSON array.'
 
   const response = await groq.chat.completions.create({
     model: FAST_MODEL,

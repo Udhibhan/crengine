@@ -14,33 +14,31 @@ export async function GET() {
     .order('created_at', { ascending: false })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ beliefs })
+  return NextResponse.json({ beliefs: beliefs || [] })
 }
 
-// Semantic similarity — catches paraphrases like "not ideal" vs "unpleasant"
-function isSimilar(a: string, b: string): boolean {
-  const norm = (s: string) => s.toLowerCase()
-    .replace(/\b(is|are|was|were|a|an|the|it|its|not|no|so|very|quite|really|just|also|too|for|with|and|or|but|in|on|at|to|of|my|i|you|we|they|he|she|this|that|these|those)\b/g, ' ')
+// Compare two belief strings — are they saying essentially the same thing?
+function isSameIdea(a: string, b: string): boolean {
+  const clean = (s: string) => s
+    .toLowerCase()
+    .replace(/\b(is|are|was|were|a|an|the|it|its|not|no|so|very|quite|really|just|also|too|for|with|and|or|but|in|on|at|to|of|my|i|you|we|they|he|she|this|that|these|those|always|never|often|sometimes|can|cant|cannot|will|wont|would|should|dont|do|does|be|been|have|has|had)\b/g, '')
     .replace(/[^a-z0-9 ]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
 
-  const na = norm(a)
-  const nb = norm(b)
-  if (na === nb) return true
+  const ca = clean(a)
+  const cb = clean(b)
 
-  // Word overlap — ignore stop words
-  const wordsA = new Set(na.split(' ').filter(w => w.length > 3))
-  const wordsB = new Set(nb.split(' ').filter(w => w.length > 3))
-  if (wordsA.size === 0 && wordsB.size === 0) return true
-  if (wordsA.size === 0 || wordsB.size === 0) return false
+  if (ca === cb) return true
+  if (ca.length < 8 || cb.length < 8) return false
 
-  let overlap = 0
-  wordsA.forEach(w => { if (wordsB.has(w)) overlap++ })
-  const ratio = overlap / Math.min(wordsA.size, wordsB.size)
+  const wordsA = ca.split(' ').filter(w => w.length > 3)
+  const wordsB = new Set(cb.split(' ').filter(w => w.length > 3))
+  if (wordsA.length === 0 || wordsB.size === 0) return false
 
-  // High overlap = same belief stated differently
-  return ratio >= 0.6
+  const overlap = wordsA.filter(w => wordsB.has(w)).length
+  const ratio = overlap / Math.min(wordsA.length, wordsB.size)
+  return ratio >= 0.65
 }
 
 export async function POST(req: NextRequest) {
@@ -49,52 +47,59 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { rawInput } = await req.json()
-  if (!rawInput || rawInput.trim().length < 5) {
-    return NextResponse.json({ error: 'Input too short.' }, { status: 400 })
+  if (!rawInput || rawInput.trim().length < 4) {
+    return NextResponse.json({ beliefs: [], contradictions: [] })
   }
 
-  // Extract beliefs
+  // Extract beliefs — AI will return [] for non-belief inputs
   let extracted
   try {
     extracted = await extractBeliefs(rawInput)
   } catch {
-    return NextResponse.json({ error: 'AI extraction failed.' }, { status: 500 })
+    return NextResponse.json({ error: 'AI failed.' }, { status: 500 })
   }
 
+  // AI returned nothing — not a belief statement, just process as dialogue
   if (!extracted || extracted.length === 0) {
-    return NextResponse.json({ error: 'No beliefs extracted.' }, { status: 422 })
+    return NextResponse.json({ beliefs: [], contradictions: [], count: 0 })
   }
 
-  // Get existing beliefs
-  const { data: existingBeliefs } = await supabase
+  // Fetch existing beliefs
+  const { data: existingRaw } = await supabase
     .from('beliefs')
     .select('*')
     .eq('user_id', user.id)
     .order('created_at', { ascending: false })
-    .limit(100)
+    .limit(150)
 
-  const existing = existingBeliefs || []
+  const existing = existingRaw || []
   const savedBeliefs = []
 
   for (const b of extracted) {
-    // Check if similar belief already exists
-    const duplicate = existing.find(e => isSimilar(e.content, b.content))
+    // Check for duplicate
+    const duplicate = existing.find(e => isSameIdea(e.content, b.content))
 
     if (duplicate) {
-      // Update confidence score (average) instead of creating new
-      const newScore = Math.min(1, (duplicate.confidence_score + b.confidence_score) / 2 + 0.05)
+      // Bump confidence slightly — same idea stated again = more certain
+      const newScore = Math.min(0.99, duplicate.confidence_score + 0.04)
       await supabase
         .from('beliefs')
-        .update({ confidence_score: newScore })
+        .update({ confidence_score: parseFloat(newScore.toFixed(2)) })
         .eq('id', duplicate.id)
-      savedBeliefs.push({ ...duplicate, confidence_score: newScore })
+      savedBeliefs.push({ ...duplicate, confidence_score: newScore, _isDuplicate: true })
     } else {
-      // Insert new
       const { data: inserted } = await supabase
         .from('beliefs')
-        .insert({ user_id: user.id, content: b.content, category: b.category, confidence_score: b.confidence_score, raw_input: rawInput })
+        .insert({
+          user_id: user.id,
+          content: b.content,
+          category: b.category,
+          confidence_score: parseFloat(b.confidence_score.toFixed(2)),
+          raw_input: rawInput,
+        })
         .select()
         .single()
+
       if (inserted) {
         savedBeliefs.push(inserted)
         existing.push(inserted)
@@ -102,38 +107,39 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Detect contradictions only for truly new beliefs
-  const newOnly = savedBeliefs.filter(b => !existingBeliefs?.find(e => e.id === b.id))
-  const previousBeliefs = existing.filter(e => !newOnly.find(n => n.id === e.id))
-  const allContradictions = []
+  // Only process contradictions and relations for genuinely new beliefs
+  const newBeliefs = savedBeliefs.filter(b => !b._isDuplicate)
+  const previousBeliefs = existing.filter(e => !newBeliefs.find(n => n.id === e.id))
+  const allContradictions: Array<{ belief_id: string; belief_content: string; contradiction_score: number; explanation: string }> = []
 
-  if (previousBeliefs.length > 0 && newOnly.length > 0) {
-    for (const newBelief of newOnly) {
+  if (newBeliefs.length > 0 && previousBeliefs.length > 0) {
+    for (const nb of newBeliefs) {
       try {
-        const result = await detectContradictions(newBelief.content, previousBeliefs)
-        if (result.has_contradiction) {
+        // Contradictions
+        const result = await detectContradictions(nb.content, previousBeliefs)
+        if (result.has_contradiction && result.contradictions.length > 0) {
           allContradictions.push(...result.contradictions)
-          const toInsert = result.contradictions
-            .filter(c => c.contradiction_score > 0.75)
-            .map(c => ({
-              belief_id_1: newBelief.id,
+          await supabase.from('belief_relations').insert(
+            result.contradictions.map(c => ({
+              belief_id_1: nb.id,
               belief_id_2: c.belief_id,
               relation_type: 'contradicts',
-              strength_score: c.contradiction_score,
+              strength_score: parseFloat(c.contradiction_score.toFixed(2)),
               explanation: c.explanation,
             }))
-          if (toInsert.length > 0) await supabase.from('belief_relations').insert(toInsert)
+          )
         }
 
-        const relations = await detectRelations(newBelief, previousBeliefs)
+        // Other relations
+        const relations = await detectRelations(nb, previousBeliefs)
         const nonContra = relations.filter(r => r.relation_type !== 'contradicts')
         if (nonContra.length > 0) {
           await supabase.from('belief_relations').insert(
             nonContra.map(r => ({
-              belief_id_1: newBelief.id,
+              belief_id_1: nb.id,
               belief_id_2: r.belief_id,
               relation_type: r.relation_type,
-              strength_score: r.strength_score,
+              strength_score: parseFloat(r.strength_score.toFixed(2)),
               explanation: r.explanation,
             }))
           )
@@ -142,5 +148,9 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ beliefs: savedBeliefs, contradictions: allContradictions, count: savedBeliefs.length })
+  return NextResponse.json({
+    beliefs: savedBeliefs.map(({ _isDuplicate, ...b }) => b),
+    contradictions: allContradictions,
+    count: savedBeliefs.length,
+  })
 }
